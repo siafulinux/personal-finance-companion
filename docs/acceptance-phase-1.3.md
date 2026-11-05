@@ -194,8 +194,16 @@ Configured but **not boot-verified**:
 
 No reboot was performed — this is the user's workstation and a reboot was not authorised.
 The last boot (2026-11-03) predates these units, so "starts after a power cycle" remains
-unproven. To close it: reboot, then check `systemctl --user status pfc.target` and
-`curl -sk https://127.0.0.1:8443/api/v1/health`.
+unproven.
+
+A repeatable harness now closes the gap: `scripts/boot-test snapshot` records the good
+state (unit enablement, unit-file drift, certificate fingerprint/SANs/expiry, schema
+revision, row counts, HTTP with certificate verification, and authenticated Safe-to-Spend,
+cash and ledger totals), and `scripts/boot-test verify` diffs against it after the reboot
+and exits non-zero on any difference. A baseline was captured at commit `4b09b96` and
+matches on all 38 comparisons; the harness was self-tested against a deliberately altered
+value to confirm it fails rather than passing silently. Procedure and failure guide:
+[docs/boot-verification.md](boot-verification.md).
 
 ## Security review
 

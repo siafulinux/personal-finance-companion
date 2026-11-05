@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+# Reboot test harness for the supervised stack.
+#
+#   scripts/boot-test snapshot    # run BEFORE rebooting; records the known-good state
+#   scripts/boot-test verify      # run AFTER rebooting; compares against the snapshot
+#   scripts/boot-test checklist   # print the manual procedure
+#
+# The snapshot is written to logs/boot-test/pre-boot.txt (git-ignored). Values are
+# plain text and contain no credentials; the session token only ever lives in a
+# temporary cookie jar that is removed on exit.
+#
+# An authenticated check needs a test account. Supply it once per invocation:
+#
+#   read -r -s PFC_BOOT_PASSWORD          # prompts without echo
+#   export PFC_BOOT_EMAIL='you@example.com' PFC_BOOT_PASSWORD
+#   scripts/boot-test snapshot            # then reboot, then:
+#   scripts/boot-test verify
+#
+# Without credentials the authenticated checks are reported as SKIP, never as a pass.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+STATE_DIR="${PFC_BOOT_STATE:-$ROOT/logs/boot-test}"
+SNAP="$STATE_DIR/pre-boot.txt"
+CA="certs/pfc-ca.crt"
+TLS="https://127.0.0.1:8443"
+UNITS=(pfc.target pfc-api.service pfc-web.service pfc-tls.service)
+TABLES=(users financial_accounts transactions bills bill_occurrences budget_allocations categories)
+# Reboot legitimately changes these.
+VOLATILE_RE='^(run\.(at|uptime_s)|unit\.(pid|nrestarts)\.)'
+
+JAR=""
+cleanup() {
+  # Must succeed either way: a failing EXIT trap would overwrite the verdict's
+  # exit status, so a passing run with no cookie jar could still exit non-zero.
+  if [[ -n "$JAR" && -f "$JAR" ]]; then rm -f "$JAR"; fi
+  return 0
+}
+trap cleanup EXIT
+
+say() { printf '%s\n' "$*"; }
+kv()  { printf '%s\t%s\n' "$1" "$2"; }
+
+unit_value() { systemctl --user show -p "$2" --value "$1" 2>/dev/null || true; }
+
+# --- collectors ------------------------------------------------------------
+
+collect_units() {
+  local u
+  for u in "${UNITS[@]}"; do
+    kv "unit.enabled.$u" "$(systemctl --user is-enabled "$u" 2>&1 || true)"
+    kv "unit.active.$u"  "$(unit_value "$u" ActiveState)"
+    kv "unit.result.$u"  "$(unit_value "$u" Result)"
+  done
+  kv "unit.pid.pfc-api"  "$(unit_value pfc-api.service MainPID)"
+  kv "unit.nrestarts.pfc-api" "$(unit_value pfc-api.service NRestarts)"
+  kv "linger" "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo unknown)"
+}
+
+collect_units_sync() {
+  # The installed unit files must be the repository copies, or a reboot runs stale code.
+  local u drift=0
+  for u in "${UNITS[@]}"; do
+    local inst
+    inst="$(unit_value "$u" FragmentPath)"
+    [[ -z "$inst" || ! -f "$inst" ]] && { drift=$((drift + 1)); continue; }
+    if ! diff -q <(sed "s|@ROOT@|$ROOT|g" "deploy/systemd/$u") "$inst" >/dev/null 2>&1; then
+      drift=$((drift + 1))
+    fi
+  done
+  kv "units.drift" "$drift"
+}
+
+collect_git() {
+  kv "git.head" "$(git rev-parse --short HEAD 2>/dev/null || echo none)"
+  if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    kv "git.dirty" "1"
+  else
+    kv "git.dirty" "0"
+  fi
+}
+
+collect_cert() {
+  if [[ -f "$CA" && -f certs/pfc-server.crt ]]; then
+    kv "cert.ca_fingerprint" "$(openssl x509 -in "$CA" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+    kv "cert.not_after"      "$(openssl x509 -in certs/pfc-server.crt -noout -enddate 2>/dev/null | cut -d= -f2)"
+    kv "cert.sans"           "$(openssl x509 -in certs/pfc-server.crt -noout -ext subjectAltName 2>/dev/null | tail -1 | tr -d ' ')"
+    if openssl verify -CAfile "$CA" certs/pfc-server.crt >/dev/null 2>&1; then
+      kv "cert.chain" "ok"
+    else
+      kv "cert.chain" "broken"
+    fi
+  else
+    kv "cert.chain" "missing"
+  fi
+}
+
+collect_db() {
+  local rev
+  rev="$(cd backend && .venv/bin/alembic current 2>/dev/null | awk '{print $1}' | tail -1)"
+  kv "db.revision" "${rev:-unknown}"
+
+  local query=""
+  local t
+  for t in "${TABLES[@]}"; do
+    query+="select '$t', count(*) from $t union all "
+  done
+  query="${query% union all }"
+
+  if docker ps --filter name=pfc-db --format '{{.Names}}' 2>/dev/null | grep -q pfc-db; then
+    while IFS='|' read -r table count; do
+      [[ -z "$table" ]] && continue
+      kv "db.rows.$table" "$count"
+    done < <(docker exec pfc-db psql -U finance -d finance -tAc "$query" 2>/dev/null)
+  else
+    kv "db.rows.pfc-db" "container-not-running"
+  fi
+}
+
+http_code() {
+  # Certificate verification is intentionally ON: a reboot that leaves an expired
+  # or replaced certificate must fail here, not silently pass.
+  #
+  # Retry only on connection failure (000), so a slow start after boot does not
+  # produce a false negative, while a real non-200 status is reported at once.
+  local code attempt
+  for attempt in 1 2 3; do
+    code="$(curl -s --max-time 8 --cacert "$CA" -o /dev/null -w '%{http_code}' "$1" 2>/dev/null)" || true
+    code="${code:-000}"
+    if [[ "$code" != "000" ]]; then
+      printf '%s' "$code"
+      return 0
+    fi
+    if (( attempt < 3 )); then sleep 2; fi
+  done
+  printf '000'
+}
+
+collect_http() {
+  kv "http.health" "$(http_code "$TLS/api/v1/health")"
+  kv "http.spa" "$(http_code "$TLS/")"
+  kv "http.unauthenticated" "$(http_code "$TLS/api/v1/accounts")"
+}
+
+json_login_body() {
+  # Build the JSON in Python with the secret in the environment, never in argv,
+  # so it does not appear in the process list.
+  PFC_E="$PFC_BOOT_EMAIL" PFC_P="$PFC_BOOT_PASSWORD" python3 -c \
+    'import json, os, sys; sys.stdout.write(json.dumps({"email": os.environ["PFC_E"], "password": os.environ["PFC_P"]}))'
+}
+
+collect_auth() {
+  if [[ -z "${PFC_BOOT_EMAIL:-}" || -z "${PFC_BOOT_PASSWORD:-}" ]]; then
+    kv "auth.status" "skip-no-credentials"
+    kv "data.safe_to_spend" "skip"
+    kv "data.total_cash" "skip"
+    kv "data.transactions" "skip"
+    return
+  fi
+
+  JAR="$(mktemp)"
+  local code
+  code="$(json_login_body | curl -s --max-time 10 --cacert "$CA" -c "$JAR" \
+    -o /dev/null -w '%{http_code}' -X POST "$TLS/api/v1/auth/login" \
+    -H 'Content-Type: application/json' --data-binary @- 2>/dev/null || echo 000)"
+  kv "auth.status" "$code"
+  if [[ "$code" != "200" ]]; then
+    kv "data.safe_to_spend" "login-failed"
+    kv "data.total_cash" "login-failed"
+    kv "data.transactions" "login-failed"
+    return
+  fi
+
+  # Read one authenticated endpoint. Status and body are captured separately so a
+  # rejected request can never be mistaken for an empty result (a bare parser once
+  # turned a 422 into "0 transactions", which would have verified as a pass).
+  local body_file
+  body_file="$(mktemp)"
+
+  auth_get() {
+    curl -s --max-time 10 --cacert "$CA" -b "$JAR" -o "$body_file" \
+      -w '%{http_code}' "$TLS$1" 2>/dev/null || echo 000
+  }
+  extract() { python3 -c "$1" < "$body_file" 2>/dev/null || echo unparseable; }
+
+  local code
+  code="$(auth_get /api/v1/safe-to-spend)"
+  if [[ "$code" == 200 ]]; then
+    kv "data.safe_to_spend" "$(extract 'import json,sys;print(json.load(sys.stdin).get("safe_to_spend","?"))')"
+  else
+    kv "data.safe_to_spend" "http-$code"
+  fi
+
+  code="$(auth_get /api/v1/accounts)"
+  if [[ "$code" == 200 ]]; then
+    kv "data.total_cash" "$(extract 'import json,sys;print(json.load(sys.stdin).get("total_cash","?"))')"
+  else
+    kv "data.total_cash" "http-$code"
+  fi
+
+  # Use the server's total, not the page length: the page is capped and would
+  # silently under-count a long ledger.
+  code="$(auth_get '/api/v1/transactions?limit=200')"
+  if [[ "$code" == 200 ]]; then
+    kv "data.transactions" "$(extract 'import json,sys;d=json.load(sys.stdin);print(d.get("total", len(d.get("items",[]))))')"
+  else
+    kv "data.transactions" "http-$code"
+  fi
+
+  rm -f "$body_file"
+}
+
+collect() {
+  kv "run.at" "$(date -Is)"
+  kv "run.host" "$(hostname)"
+  kv "run.uptime_s" "$(cut -d. -f1 /proc/uptime)"
+  collect_git
+  collect_units
+  collect_units_sync
+  collect_cert
+  collect_db
+  collect_http
+  collect_auth
+}
+
+# --- commands --------------------------------------------------------------
+
+cmd_snapshot() {
+  mkdir -p "$STATE_DIR"
+  collect > "$SNAP"
+  say "Pre-boot state written to ${SNAP#"$ROOT"/}"
+  say ""
+  printf '%-26s %s\n' "KEY" "VALUE"
+  while IFS=$'\t' read -r k v; do printf '%-26s %s\n' "$k" "$v"; done < "$SNAP"
+  say ""
+  say "Reboot when ready, then run: scripts/boot-test verify"
+  if grep -q '^auth.status	skip-no-credentials' "$SNAP"; then
+    say ""
+    say "Note: no credentials were supplied, so authenticated checks were skipped."
+    say "Supply PFC_BOOT_EMAIL and PFC_BOOT_PASSWORD next time to include them."
+  fi
+}
+
+cmd_verify() {
+  if [[ ! -f "$SNAP" ]]; then
+    say "No snapshot at ${SNAP#"$ROOT"/}." >&2
+    say "Run 'scripts/boot-test snapshot' before rebooting." >&2
+    exit 2
+  fi
+
+  local now
+  now="$(mktemp)"
+  collect > "$now"
+
+  local failures=0 skips=0
+  say "Post-reboot verification against $(awk -F'\t' '/^run.at/{print $2}' "$SNAP")"
+  say ""
+
+  local key pre post
+  while IFS=$'\t' read -r key pre; do
+    post="$(awk -F'\t' -v k="$key" '$1 == k {print $2; exit}' "$now")"
+    if [[ "$key" =~ $VOLATILE_RE ]]; then
+      printf '  %-26s %-22s -> %s (informational)\n' "$key" "$pre" "$post"
+      continue
+    fi
+    # A skipped or failed read must never be reported as a passing comparison.
+    if [[ "$post" == *skip* && "$pre" != *skip* ]]; then
+      printf '  FAIL  %-24s baseline has a value but no credentials were supplied\n' "$key"
+      failures=$((failures + 1))
+      continue
+    fi
+    if [[ "$post" == "$pre" && "$post" == *skip* ]]; then
+      printf '  SKIP  %-24s no credentials supplied (not verified)\n' "$key"
+      skips=$((skips + 1))
+      continue
+    fi
+    if [[ "$post" == http-* || "$post" == login-failed || "$post" == unparseable ]]; then
+      printf '  FAIL  %-24s read failed: %s\n' "$key" "$post"
+      failures=$((failures + 1))
+      continue
+    fi
+    if [[ "$post" == "$pre" ]]; then
+      printf '  ok    %-24s %s\n' "$key" "$pre"
+    else
+      printf '  FAIL  %-24s expected=%s actual=%s\n' "$key" "$pre" "${post:-<missing>}"
+      failures=$((failures + 1))
+    fi
+  done < "$SNAP"
+
+  # Conditions that must hold regardless of the baseline.
+  say ""
+  say "Required conditions:"
+  if [[ "$(awk -F'\t' '/^unit.active.pfc.target/{print $2}' "$now")" == "active" ]]; then
+    say "  ok    pfc.target active"
+  else
+    say "  FAIL  pfc.target is not active"; failures=$((failures + 1))
+  fi
+  if [[ "$(awk -F'\t' '/^http.unauthenticated/{print $2}' "$now")" == "401" ]]; then
+    say "  ok    unauthenticated request rejected (401)"
+  else
+    say "  FAIL  unauthenticated request not rejected"; failures=$((failures + 1))
+  fi
+
+  rm -f "$now"
+  say ""
+  if (( failures == 0 )); then
+    if (( skips > 0 )); then
+      say "PASS — services, unit files, certificate, schema and row counts are intact."
+      say "       $skips authenticated check(s) were SKIPPED: data parity was not verified."
+      say "       Re-run with PFC_BOOT_EMAIL/PFC_BOOT_PASSWORD for a complete result."
+    else
+      say "PASS — the stack survived the reboot with its data and TLS trust intact."
+    fi
+    say "Keep the evidence: cp ${SNAP#"$ROOT"/} ${STATE_DIR#"$ROOT"/}/post-boot-\$(date +%Y%m%d-%H%M).txt"
+    return 0
+  fi
+  say "FAIL — $failures check(s) differ. Diagnose with:"
+  say "  systemctl --user status pfc.target pfc-api.service pfc-web.service pfc-tls.service"
+  say "  journalctl --user -u pfc-api.service -n 80 --no-pager"
+  say "  tail -40 logs/api.log logs/tls.log logs/web.log"
+  return 1
+}
+
+cmd_checklist() {
+  cat <<'EOF'
+Reboot test — supervised stack
+==============================
+
+Before rebooting
+----------------
+1. Confirm the stack is healthy right now:
+     systemctl --user status pfc.target --no-pager
+     curl -s --cacert certs/pfc-ca.crt https://127.0.0.1:8443/api/v1/health
+2. Record the known-good state (with a test account, so authenticated checks run):
+     export PFC_BOOT_EMAIL='you@example.com'
+     read -r -s PFC_BOOT_PASSWORD && export PFC_BOOT_PASSWORD
+     scripts/boot-test snapshot
+   The snapshot captures: git revision, unit enablement/state, unit-file drift,
+   certificate fingerprint/SANs/expiry, database revision and row counts, HTTP
+   reachability, and one authenticated read of Safe-to-Spend, cash and the ledger.
+3. Save any unsaved work, then reboot:
+     sudo systemctl reboot      (or the desktop's restart action)
+
+After the reboot
+----------------
+4. Do NOT log in through the desktop if you can avoid it — the point is to prove
+   the units start with Linger alone. Check from a text console or over SSH:
+     loginctl show-user "$USER" -p Linger        # expect Linger=yes
+     systemctl --user is-active pfc.target       # expect active
+     systemctl --user is-enabled pfc.target      # expect enabled
+5. Wait for the API's PreStart steps (database wait + migrations), then verify:
+     export PFC_BOOT_EMAIL='you@example.com'
+     read -r -s PFC_BOOT_PASSWORD && export PFC_BOOT_PASSWORD
+     scripts/boot-test verify
+6. A PASS means: services came back by themselves, the installed units still match
+   the repository, the certificate still verifies, the schema is at the same
+   revision, row counts are unchanged, and the authenticated figures match.
+7. Keep the evidence:
+     cp logs/boot-test/pre-boot.txt logs/boot-test/post-boot-$(date +%Y%m%d-%H%M).txt
+
+If it fails
+-----------
+  systemctl --user status pfc.target pfc-api.service pfc-web.service pfc-tls.service
+  journalctl --user -u pfc-api.service -n 80 --no-pager
+  tail -40 logs/api.log logs/tls.log logs/web.log
+Common causes: Docker/db container not started after boot (pfc-api waits and then
+gives up), an expired or regenerated certificate, or the desktop session not
+having lingered.
+
+Note: this proves supervised startup on THIS machine. It is not a physical-device
+test and says nothing about a second host.
+EOF
+}
+
+case "${1:-}" in
+  snapshot)  cmd_snapshot ;;
+  verify)    cmd_verify ;;
+  checklist) cmd_checklist ;;
+  *)         sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

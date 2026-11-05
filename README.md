@@ -167,6 +167,7 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 - [Phase 1.1 report](docs/acceptance-phase-1.1.md) — Android transaction/import tests and results.
 - [Phase 1.2 report](docs/acceptance-phase-1.2.md) — end-to-end validation, hardening, backup/restore and security evidence.
 - [Phase 1.3 report](docs/acceptance-phase-1.3.md) — recovery gate, service supervision, LAN TLS, session revocation and remaining risks.
+- [Reboot verification](docs/boot-verification.md) — how to prove the supervised stack returns after a reboot, and what to check when it does not.
 
 ## Limits
 
