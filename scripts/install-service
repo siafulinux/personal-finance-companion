@@ -54,7 +54,9 @@ done
 chmod +x scripts/wait-for-db
 
 systemctl --user daemon-reload
-systemctl --user enable pfc.target >/dev/null
+# Enable the units themselves as well as the target, so each is individually
+# enabled for boot and not only pulled in by the target's Wants=.
+systemctl --user enable pfc.target pfc-api.service pfc-web.service pfc-tls.service >/dev/null
 # A target restart does not restart its members; stop then start the target.
 systemctl --user stop pfc.target >/dev/null 2>&1 || true
 systemctl --user start pfc.target
