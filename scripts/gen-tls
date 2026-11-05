@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Create the project's own CA and a server certificate covering every address
+# the app is reached on: loopback, the emulator's host alias and the LAN IP.
+#
+# The CA private key stays in certs/ (git-ignored). Only the CA certificate is
+# copied into the Android app, so clients trust exactly this server.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+CERT_DIR="certs"
+CA_KEY="$CERT_DIR/pfc-ca.key"
+CA_CRT="$CERT_DIR/pfc-ca.crt"
+SRV_KEY="$CERT_DIR/pfc-server.key"
+SRV_CRT="$CERT_DIR/pfc-server.crt"
+SRV_CSR="$CERT_DIR/pfc-server.csr"
+DAYS_CA=3650
+DAYS_SRV=825
+
+LAN_IP="${PFC_LAN_IP:-192.168.1.5}"
+mkdir -p "$CERT_DIR"
+chmod 700 "$CERT_DIR"
+
+if [[ ! -f "$CA_KEY" || ! -f "$CA_CRT" ]]; then
+  echo "Creating project CA…"
+  openssl req -x509 -new -nodes -newkey rsa:4096 -sha256 -days "$DAYS_CA" \
+    -keyout "$CA_KEY" -out "$CA_CRT" \
+    -subj "/CN=Personal Finance Companion Local CA/O=Personal Finance Companion" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "subjectKeyIdentifier=hash" 2>/dev/null
+  chmod 600 "$CA_KEY"
+fi
+
+echo "Creating server certificate for 127.0.0.1, localhost, 10.0.2.2, $LAN_IP…"
+openssl req -new -nodes -newkey rsa:2048 -sha256 \
+  -keyout "$SRV_KEY" -out "$SRV_CSR" \
+  -subj "/CN=pfc-local/O=Personal Finance Companion" 2>/dev/null
+
+cat > "$CERT_DIR/pfc-server.ext" <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:10.0.2.2,IP:$LAN_IP
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+EOF
+
+openssl x509 -req -in "$SRV_CSR" -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+  -out "$SRV_CRT" -days "$DAYS_SRV" -sha256 -extfile "$CERT_DIR/pfc-server.ext" 2>/dev/null
+
+rm -f "$SRV_CSR" "$CERT_DIR/pfc-server.ext"
+chmod 600 "$SRV_KEY"
+echo "Wrote $SRV_CRT (signed by $CA_CRT)"
+openssl x509 -in "$SRV_CRT" -noout -subject -enddate
+openssl x509 -in "$SRV_CRT" -noout -text | grep -A1 "Subject Alternative Name"

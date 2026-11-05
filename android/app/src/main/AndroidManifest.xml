@@ -3,15 +3,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Cleartext is allowed only so a development server on the LAN can be reached.
-         Point the app at an HTTPS endpoint before shipping it. -->
+    <!-- HTTPS only, trusting the project's Caddy internal CA (bundled raw cert).
+         Cleartext is limited to loopback for adb-reverse debugging. -->
     <application
         android:name=".CompanionApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@style/Theme.Companion"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"

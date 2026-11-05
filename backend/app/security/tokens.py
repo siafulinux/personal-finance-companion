@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -32,7 +33,16 @@ def create_access_token(user_id: uuid.UUID, *, expires_minutes: int | None = Non
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def decode_access_token(token: str) -> uuid.UUID:
+@dataclass(frozen=True)
+class TokenClaims:
+    """Verified contents of an access token."""
+
+    user_id: uuid.UUID
+    jti: str
+    expires_at: datetime
+
+
+def decode_token(token: str) -> TokenClaims:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     except jwt.ExpiredSignatureError as exc:
@@ -45,9 +55,18 @@ def decode_access_token(token: str) -> uuid.UUID:
     if not subject:
         raise TokenError("Token is missing a subject.")
     try:
-        return uuid.UUID(subject)
+        user_id = uuid.UUID(subject)
     except ValueError as exc:
         raise TokenError("Token subject is invalid.") from exc
+    jti = payload.get("jti")
+    if not jti:
+        raise TokenError("Token is missing an identifier.")
+    expires_at = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
+    return TokenClaims(user_id=user_id, jti=str(jti), expires_at=expires_at)
+
+
+def decode_access_token(token: str) -> uuid.UUID:
+    return decode_token(token).user_id
 
 
 def new_csrf_token() -> str:

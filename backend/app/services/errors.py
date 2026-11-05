@@ -28,5 +28,11 @@ class AuthenticationError(DomainError):
     status_code = 401
 
 
+class RateLimitError(DomainError):
+    """Throttled, not unauthenticated: clients must be able to tell the two apart."""
+
+    status_code = 429
+
+
 class ForbiddenError(DomainError):
     status_code = 403

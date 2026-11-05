@@ -6,7 +6,13 @@ from app.models.bill import Bill, BillOccurrence, BillPaymentMatch, MerchantAlia
 from app.models.budget import Budget, BudgetAllocation, PlannedReserve
 from app.models.import_job import ImportRecord, TransactionImport
 from app.models.transaction import Transaction
-from app.models.user import IncomeSource, NotificationPreference, User, UserPreference
+from app.models.user import (
+    IncomeSource,
+    NotificationPreference,
+    RevokedToken,
+    User,
+    UserPreference,
+)
 
 __all__ = [
     "Base",
@@ -23,6 +29,7 @@ __all__ = [
     "MerchantAlias",
     "NotificationPreference",
     "PlannedReserve",
+    "RevokedToken",
     "Transaction",
     "TransactionImport",
     "User",

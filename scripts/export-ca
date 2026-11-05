@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Export the Caddy internal root CA into the Android app so the app can trust
+# the LAN server without disabling certificate verification.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+CA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/caddy/pki/authorities/local"
+CA_SRC="$CA_DIR/root.crt"
+DEST="android/app/src/main/res/raw/pfc_ca.crt"
+
+if [[ ! -f "$CA_SRC" ]]; then
+  echo "No Caddy local root CA at $CA_SRC." >&2
+  echo "Start the TLS front once (scripts/install-service) and retry." >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$DEST")"
+cp "$CA_SRC" "$DEST"
+echo "Exported CA to $DEST"
+echo "Fingerprint:"
+openssl x509 -in "$DEST" -noout -fingerprint -sha256

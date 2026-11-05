@@ -17,9 +17,10 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 10.0.2.2 is the host machine as seen from the Android emulator.
-        // Change it in Settings inside the app for a physical device.
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8010/api/v1/\"")
+        // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
+        // goes through the Caddy TLS front (port 8443). Change it in Settings for
+        // a physical device, using the host's LAN address and the same port.
+        buildConfigField("String", "API_BASE_URL", "\"https://10.0.2.2:8443/api/v1/\"")
     }
 
     buildTypes {

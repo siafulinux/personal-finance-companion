@@ -1,0 +1,32 @@
+[Unit]
+Description=Personal Finance Companion API (uvicorn)
+Documentation=file://@ROOT@/docs/android.md
+After=network-online.target docker.service
+Wants=network-online.target
+PartOf=pfc.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@/backend
+EnvironmentFile=-@ROOT@/.env
+Environment=PYTHONUNBUFFERED=1
+# Wait for the Docker database, then apply migrations before serving traffic.
+ExecStartPre=@ROOT@/scripts/wait-for-db
+ExecStartPre=@ROOT@/backend/.venv/bin/alembic upgrade head
+# Exactly one worker: the login rate limiter is per-process, so scaling workers
+# would weaken it. Keep this at 1 until a shared limiter exists.
+ExecStart=@ROOT@/backend/.venv/bin/uvicorn app.main:app \
+    --host ${API_HOST} --port ${API_PORT} \
+    --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=25
+KillSignal=SIGTERM
+# A crashing listener should not spin forever if it fails immediately every time.
+StandardOutput=append:@ROOT@/logs/api.log
+StandardError=append:@ROOT@/logs/api.log
+
+[Install]
+WantedBy=pfc.target

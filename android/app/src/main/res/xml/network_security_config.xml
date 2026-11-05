@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The finance server is reached over HTTPS with a certificate issued by the
+  project's own Caddy internal CA. That CA is bundled as a raw resource so the
+  certificate chains without disabling verification or trusting every user CA.
+
+  Cleartext stays available for loopback only, so `adb reverse` debugging on
+  127.0.0.1 keeps working. Everything else must be HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/pfc_ca" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+
+    <!-- Debug builds additionally accept a user-installed CA, e.g. an
+         `adb install`-time certificate for ad-hoc troubleshooting. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

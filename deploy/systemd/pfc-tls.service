@@ -1,0 +1,23 @@
+[Unit]
+Description=Personal Finance Companion TLS front (Caddy, internal CA)
+Documentation=file://@ROOT@/docs/android.md
+After=network-online.target pfc-api.service pfc-web.service
+Wants=network-online.target pfc-api.service pfc-web.service
+PartOf=pfc.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+Environment=PFC_TLS_CERT=@ROOT@/certs/pfc-server.crt
+Environment=PFC_TLS_KEY=@ROOT@/certs/pfc-server.key
+ExecStart=/usr/bin/caddy run --config @ROOT@/deploy/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+StandardOutput=append:@ROOT@/logs/tls.log
+StandardError=append:@ROOT@/logs/tls.log
+
+[Install]
+WantedBy=pfc.target

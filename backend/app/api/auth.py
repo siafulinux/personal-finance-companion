@@ -32,9 +32,15 @@ from app.schemas.auth import (
     UserOut,
 )
 from app.schemas.common import Message
-from app.security.deps import get_current_user
+from app.security.deps import get_current_user, token_from_request
 from app.security.passwords import validate_password_strength
-from app.services.errors import AuthenticationError, DomainError, ValidationError
+from app.services.errors import (
+    AuthenticationError,
+    DomainError,
+    RateLimitError,
+    ValidationError,
+)
+from app.services.sessions import revoke_token
 from app.services.users import (
     update_profile,
     add_income_source,
@@ -67,7 +73,7 @@ def _rate_limit(key: str) -> None:
     while bucket and now - bucket[0] > WINDOW_SECONDS:
         bucket.popleft()
     if len(bucket) >= MAX_ATTEMPTS:
-        raise AuthenticationError("Too many sign-in attempts. Try again in a minute.")
+        raise RateLimitError("Too many sign-in attempts. Try again in a minute.")
     bucket.append(now)
 
 
@@ -111,7 +117,14 @@ def login(
 
 
 @router.post("/auth/logout", response_model=Message)
-def logout(response: Response) -> Message:
+def logout(
+    request: Request, response: Response, db: Session = Depends(get_db)
+) -> Message:
+    # Clearing cookies is not enough for a stateless token: record the token's
+    # jti so a copied token stops working immediately, from any client.
+    token = token_from_request(request)
+    if token:
+        revoke_token(db, token)
     clear_session_cookies(response)
     return Message(message="Signed out.")
 

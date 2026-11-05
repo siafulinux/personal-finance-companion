@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Block until the project's Postgres container accepts connections.
+# Used as ExecStartPre by pfc-api.service so the unit does not fail during boot.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+DB_CONTAINER="${DB_CONTAINER:-pfc-db}"
+DB_USER="${POSTGRES_USER:-finance}"
+DB_NAME="${POSTGRES_DB:-finance}"
+
+for _ in $(seq 1 60); do
+  if docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER" \
+    && docker exec "$DB_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "wait-for-db: $DB_CONTAINER did not become ready within 120s" >&2
+exit 1

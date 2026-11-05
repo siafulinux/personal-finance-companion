@@ -4,6 +4,8 @@
 !.env.example
 *.pem
 *.key
+# Locally generated TLS material (CA key and server key must never be committed)
+certs/
 
 # Python
 __pycache__/

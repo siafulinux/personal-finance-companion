@@ -1,0 +1,37 @@
+{
+	# 2019 is used by the machine-wide Caddy; keep our admin endpoint separate.
+	admin 127.0.0.1:2020
+	# Port 80/443 belong to the machine-wide Caddy; serve HTTPS only on 8443.
+	auto_https off
+}
+
+# One listener with one project certificate, so a client connecting by IP
+# (10.0.2.2 from the emulator, or the LAN address) always receives a
+# certificate that covers the name it used. See scripts/gen-tls.
+https://:8443 {
+	tls {$PFC_TLS_CERT} {$PFC_TLS_KEY}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The API is the only stateful surface; everything else is the SPA/Vite app.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{$API_PORT:8010}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:{$WEB_PORT:5183}
+	}
+
+	log {
+		output file logs/tls-access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+		format console
+	}
+}

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Install and start supervised user units for this workspace.
+#
+# The legacy single oneshot wrapper (pfc.service, which only started detached
+# children and never supervised them) is retired in place: it is stopped,
+# disabled and renamed to pfc.service.disabled-oneshot so it remains inspectable.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+mkdir -p "$UNIT_DIR" logs
+
+if ! command -v caddy >/dev/null 2>&1; then
+  echo "Caddy is required for the TLS front. Install caddy first." >&2
+  exit 1
+fi
+
+# Stop any children the old wrapper (or ./scripts/app) left behind: they would
+# hold the ports the supervised units need.
+systemctl --user stop pfc.service >/dev/null 2>&1 || true
+systemctl --user disable pfc.service >/dev/null 2>&1 || true
+if [[ -f "$UNIT_DIR/pfc.service" ]]; then
+  mv "$UNIT_DIR/pfc.service" "$UNIT_DIR/pfc.service.disabled-oneshot"
+  echo "Retired legacy unit -> $UNIT_DIR/pfc.service.disabled-oneshot"
+fi
+"$ROOT/scripts/app" stop >/dev/null 2>&1 || true
+
+for unit in pfc-api.service pfc-web.service pfc-tls.service pfc.target; do
+  sed "s|@ROOT@|$ROOT|g" "deploy/systemd/$unit" > "$UNIT_DIR/$unit"
+done
+
+chmod +x scripts/wait-for-db
+
+systemctl --user daemon-reload
+systemctl --user enable pfc.target >/dev/null
+# A target restart does not restart its members; stop then start the target.
+systemctl --user stop pfc.target >/dev/null 2>&1 || true
+systemctl --user start pfc.target
+
+echo "Installed units from $ROOT into $UNIT_DIR"
+echo "Check with: systemctl --user status pfc-api.service pfc-web.service pfc-tls.service"
