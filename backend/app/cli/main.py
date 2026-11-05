@@ -158,6 +158,170 @@ def backup(
     _ok(f"Backup written to {destination} ({size / 1024:.1f} KiB, {entries} table(s) with data)")
 
 
+def _psql(db: str, sql: str) -> subprocess.CompletedProcess:
+    """Run one statement against a database inside the container."""
+    return subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            DB_CONTAINER,
+            "psql",
+            "-X",
+            "-q",
+            "-tA",
+            "-F",
+            "|",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            settings.postgres_user,
+            "-d",
+            db,
+            "-c",
+            sql,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+
+
+def _public_tables(db: str) -> list[str]:
+    result = _psql(
+        db, "select tablename from pg_tables where schemaname = 'public' order by 1"
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"could not list tables in {db}")
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _content_checksums(db: str) -> dict[str, str]:
+    """Order-independent hash of every row in every public table.
+
+    Row contents are hashed individually (so column values count, not just the row
+    count) and the hashes are sorted before aggregation, so the result does not
+    depend on physical row order.
+    """
+    tables = _public_tables(db)
+    parts = []
+    for table in tables:
+        ident = '"' + table.replace('"', '""') + '"'
+        parts.append(
+            f"select '{table}' as t, md5(coalesce(string_agg(h, '' order by h), '')) "
+            f'from (select md5(x::text) as h from public.{ident} x) s'
+        )
+    if not parts:
+        return {}
+    result = _psql(db, " union all ".join(parts) + " order by 1")
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"could not checksum {db}")
+    checksums: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        name, _, digest = line.partition("|")
+        checksums[name] = digest.strip()
+    return checksums
+
+
+@app.command("verify-backup")
+def verify_backup(
+    source: Path = typer.Argument(
+        None, help="Dump to verify; defaults to the newest file in ./backups"
+    ),
+) -> None:
+    """Restore a dump into a scratch database and compare every table by content.
+
+    Production is only read. The scratch database is created for this check and
+    dropped again even if the comparison fails.
+    """
+    if source is None:
+        dumps = sorted(BACKUPS_DIR.glob("*.dump"), key=lambda p: p.stat().st_mtime)
+        if not dumps:
+            _fail(f"No .dump files in {BACKUPS_DIR}")
+            raise typer.Exit(1)
+        source = dumps[-1]
+    if not source.is_file():
+        _fail(f"{source} does not exist")
+        raise typer.Exit(1)
+
+    entries = _table_data_entries(source)
+    if entries is None:
+        _fail(f"{source.name} cannot be read as a dump")
+        raise typer.Exit(1)
+    if entries == 0:
+        _fail(f"{source.name} contains no table data; there is nothing to verify")
+        raise typer.Exit(1)
+
+    production = settings.postgres_db
+    scratch = f"finance_verify_{datetime.now():%Y%m%d%H%M%S}"
+    typer.echo(f"Restoring {source.name} into scratch database {scratch}…")
+
+    created = _psql("postgres", f'create database "{scratch}"')
+    if created.returncode != 0:
+        _fail(created.stderr.strip() or f"could not create {scratch}")
+        raise typer.Exit(1)
+
+    try:
+        with source.open("rb") as handle:
+            restored = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    DB_CONTAINER,
+                    "pg_restore",
+                    "-U",
+                    settings.postgres_user,
+                    "-d",
+                    scratch,
+                    "--no-owner",
+                    "--exit-on-error",
+                ],
+                stdin=handle,
+                capture_output=True,
+            )
+        if restored.returncode != 0:
+            _fail(
+                "pg_restore failed: "
+                + restored.stderr.decode("utf-8", "ignore").strip()[:800]
+            )
+            raise typer.Exit(1)
+
+        live = _content_checksums(production)
+        copy = _content_checksums(scratch)
+    finally:
+        # Guarded so a name mix-up can never drop a real database.
+        if scratch.startswith("finance_verify_"):
+            _psql("postgres", f'drop database if exists "{scratch}"')
+
+    names = sorted(set(live) | set(copy))
+    mismatched = 0
+    typer.echo(f"{'table':<28}{'content':<10}")
+    for name in names:
+        if name not in copy:
+            status = "MISSING"
+        elif name not in live:
+            status = "EXTRA"
+        elif live[name] == copy[name]:
+            status = "match"
+        else:
+            status = "DIFFERS"
+            typer.echo(
+                f"    {name}: production {live.get(name, '-')} restored {copy.get(name, '-')}",
+                err=True,
+            )
+        if status != "match":
+            mismatched += 1
+        typer.echo(f"{name:<28}{status:<10}")
+
+    if mismatched:
+        _fail(f"{mismatched} of {len(names)} table(s) do not match; do not rely on this backup.")
+        raise typer.Exit(1)
+    _ok(f"Restored copy is content-identical to {production} across all {len(names)} tables.")
+
+
 @app.command()
 def restore(
     source: Path = typer.Argument(..., exists=True, readable=True, help="Backup .dump file"),

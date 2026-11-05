@@ -39,6 +39,9 @@ Data and quality:
   test-web       run frontend tests
   build-web      production build of the web app
   backup         write a database dump into ./backups
+  verify-backup [FILE]
+                 restore a dump into a scratch database and compare every table
+                 by content (default: newest dump in ./backups)
   restore FILE   restore a dump (replaces current data)
   doctor         environment and configuration checks
   logs           tail API and web logs
@@ -198,6 +201,7 @@ case "${1:-}" in
   test-web) (cd web && npm test) ;;
   build-web) (cd web && npm run build) ;;
   backup) "$PFC" backup ;;
+  verify-backup) shift; "$PFC" verify-backup "$@" ;;
   restore) shift; "$PFC" restore "$@" ;;
   doctor)
     need_db || true

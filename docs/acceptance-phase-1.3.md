@@ -149,8 +149,21 @@ database was rehearsed end to end:
 | Row counts for all 19 tables, production vs restored | identical in every table — e.g. users 6/6, transactions 32/32, bill_occurrences 141/141, categories 115/115, budgets 4/4, bills 12/12, bill_payment_matches 4/4 |
 | Cleanup | scratch database dropped; `finance` and `finance_test` remain; production still `6 \| 32 \| 12` at `b9cb28b8b1a5`, HTTPS health `ok` |
 
-Only row counts and the schema revision were compared; the rehearsal did not diff column
-values or row contents.
+That rehearsal compared row counts only, which cannot detect a backup whose fields are
+tampered or corrupted while the counts stay the same. `pfc verify-backup [dump]` now does
+the content-level check: it restores into a scratch database, hashes every row of every
+public table (`md5(x::text)`, aggregated in sorted order so physical row order does not
+matter), compares those digests against production, and always drops the scratch database.
+
+| Test | Observed |
+| --- | --- |
+| `pfc verify-backup` on the newest dump | all 19 tables `match`, exit `0` |
+| Deliberately tampered copy: one `users.display_name` changed, **row counts identical** | `users DIFFERS` (production `881813a9…`, restored `cb67561f…`), `FAIL 1 of 19`, exit `1` |
+| Scratch cleanup after both runs | no `finance_verify_*` databases remain; `finance` and `finance_test` untouched |
+
+Limitations: the hashes cover table contents, not indexes, constraints, sequences or
+ownership; a table only present on one side is reported as `MISSING`/`EXTRA` and counts as a
+failure.
 
 ### Authentication probes (live service, HTTPS through Caddy)
 

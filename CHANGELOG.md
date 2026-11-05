@@ -28,6 +28,10 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 - **Restore rehearsed.** The newest dump was restored into a scratch database, compared
   table-by-table against production (19/19 identical, same `alembic_version`) and the scratch
   database dropped.
+- **`pfc verify-backup [dump]`.** Restores a dump into a scratch database, hashes every row
+  of every public table and compares the digests with production, so a backup that restores
+  with the right row counts but wrong contents is rejected. The scratch database is always
+  dropped, and the command defaults to the newest dump in `backups/`.
 - **Reboot verification harness.** `scripts/boot-test snapshot|verify` records and diffs the
   unit state, certificate, schema revision, row counts, TLS-checked HTTP and authenticated
   figures. Procedure in `docs/boot-verification.md`.
