@@ -91,11 +91,35 @@ def seed_demo(
     typer.echo(f"    password: {settings.demo_user_password}")
 
 
+def _table_data_entries(path: Path) -> int | None:
+    """Count TABLE DATA entries in a custom-format dump, or None if unreadable.
+
+    A dump of an empty database is structurally valid but restores to nothing;
+    the count is the only cheap way to tell the two apart.
+    """
+    command = ["docker", "exec", "-i", DB_CONTAINER, "pg_restore", "--list"]
+    try:
+        with path.open("rb") as handle:
+            result = subprocess.run(
+                command, stdin=handle, capture_output=True, timeout=120
+            )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    listing = result.stdout.decode("utf-8", "ignore")
+    return sum(1 for line in listing.splitlines() if " TABLE DATA " in line)
+
+
 @app.command()
 def backup(
     output: Path = typer.Option(None, "--output", "-o", help="Destination .dump file"),
 ) -> None:
-    """Create a compressed PostgreSQL backup inside ./backups."""
+    """Create a compressed PostgreSQL backup inside ./backups.
+
+    Refuses to keep a dump that contains no table data: such a file restores
+    cleanly to an empty database, which is worse than a failed backup.
+    """
     BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     destination = output or BACKUPS_DIR / f"finance-{datetime.now():%Y%m%d-%H%M%S}.dump"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -112,10 +136,26 @@ def backup(
     with destination.open("wb") as handle:
         result = subprocess.run(command, stdout=handle, stderr=subprocess.PIPE)
     if result.returncode != 0:
+        # Leave nothing behind that could be mistaken for a usable backup.
+        destination.unlink(missing_ok=True)
         _fail(result.stderr.decode("utf-8", "ignore"))
         raise typer.Exit(1)
+
+    entries = _table_data_entries(destination)
+    if entries is None:
+        destination.unlink(missing_ok=True)
+        _fail(f"Could not verify {destination.name}; deleted it rather than keep an unchecked dump.")
+        raise typer.Exit(1)
+    if entries == 0:
+        destination.unlink(missing_ok=True)
+        _fail(
+            "Refusing to keep a dump with no table data: it would restore to an empty "
+            "database. Is " + DB_CONTAINER + " running with the expected data?"
+        )
+        raise typer.Exit(1)
+
     size = destination.stat().st_size
-    _ok(f"Backup written to {destination} ({size / 1024:.1f} KiB)")
+    _ok(f"Backup written to {destination} ({size / 1024:.1f} KiB, {entries} table(s) with data)")
 
 
 @app.command()

@@ -132,7 +132,7 @@ Demo data is visibly marked in both apps and can be removed with `./scripts/app 
 ./scripts/app test          # backend test suite
 ./scripts/app test-web      # frontend tests
 ./scripts/app build-web     # production web build
-./scripts/app backup        # compressed PostgreSQL dump in ./backups
+./scripts/app backup        # compressed PostgreSQL dump in ./backups (refuses an empty dump)
 ./scripts/app restore FILE  # restore a dump (replaces current data)
 ./scripts/app doctor        # runtimes, migrations, configuration, ports
 ```

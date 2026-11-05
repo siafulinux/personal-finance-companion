@@ -46,6 +46,11 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 - `backend/tests/test_imports.py` hardcoded November dates while the bill-matching window is
   relative to today, so the suite began failing as the calendar moved. The fixture now uses
   relative dates; no assertion was weakened.
+- **`pfc backup` / `./scripts/app backup` now verifies what it wrote.** After dumping, it
+  counts `TABLE DATA` entries with `pg_restore --list`; a dump with none (or one that cannot
+  be listed) is deleted and the command exits non-zero with an explanation. Previously an
+  empty database produced a small, valid-looking dump that restored to nothing. A failed
+  `pg_dump` also no longer leaves a partial file behind.
 
 ### Security notes
 
@@ -96,10 +101,16 @@ state after the incident below; it is the baseline later phases build on.
   account holds two future-dated posted expenses created before the future-date guard
 existed (noted in `docs/acceptance-phase-1.2.md`).
 
-### ⚠ Backup hazard found during Phase 1.3
+### ⚠ Backup hazard found during Phase 1.3 — resolved
 
-`backups/finance-20261104-151726.dump` is **not a usable backup**: 836 bytes, 4 TOC entries,
+`backups/finance-20261104-151726.dump` was **not a usable backup**: 836 bytes, 4 TOC entries,
 zero table data — it was taken while the database was still empty. A restore from it would
-silently produce an empty database. Treat only the 11-02 and 11-03 dumps as valid, and
-verify any backup with `pg_restore --list <dump> | grep -c 'TABLE DATA'` before relying on
-it.
+have silently produced an empty database.
+
+It has been **deleted** (2026-11-05), and `pfc backup` now refuses to keep such a dump in the
+first place, so the same trap cannot be recreated. Validate any older dump by hand with
+`pg_restore --list <dump> | grep -c 'TABLE DATA'` before relying on it.
+
+Known-good dumps at the time of writing: `finance-20261102-171321.dump` (fallback),
+`finance-20261103-090323.dump` (the restore used in recovery) and
+`finance-20261105-110231.dump` (post-recovery, 19 tables with data).
