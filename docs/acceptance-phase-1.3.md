@@ -111,7 +111,26 @@ with a bare `25.0.5` error. Use `JAVA_HOME=../.tools/jdk17`.
 | `systemctl --user kill -s SIGKILL pfc-api` | Restarted in ~5s, `NRestarts=1`, `Result=success`, `GET /health` → `200` |
 | `systemctl --user stop pfc-api` | `Result=success`, exit by SIGTERM, port 8010 released |
 | `systemctl --user restart pfc.target` | All three services active; API `200`, TLS `200`, and an existing session still authenticated |
-| Unit drift | Installed units under `~/.config/systemd/user/` are byte-identical to `deploy/systemd/` after `@ROOT@` substitution |
+| Unit drift | Installed units under `~/.config/systemd/user/` are byte-identical to `deploy/systemd/`; the files are static and carry no workspace path |
+
+### Path independence and relocation (live, not simulated)
+
+The Phase 1.2 wrapper hard-coded the workspace in `WorkingDirectory=` and broke outright when
+the tree moved during recovery. The units now contain no project path at all. Each
+`ExecStart` calls `~/.local/lib/pfc/pfc-run`, which resolves the workspace through
+`~/.config/pfc/workspace` and loads `.env` itself.
+
+| Test | Observed |
+| --- | --- |
+| `./scripts/install-service` | Launcher at `~/.local/lib/pfc/pfc-run`; pointer set; all three units plus target `active`, none failed |
+| Units reference the workspace | `grep -rn '/home/\|@ROOT@' deploy/systemd deploy/bin` → no matches |
+| `scripts/relocate /tmp/pfc-relocated-workspace` (pointer retargeted, **no reinstall**) | Stack restarted and healthy; `pfc-run where` resolved to the real path; units byte-identical before and after |
+| Stale pointer (symlink to a deleted directory) | `pfc-api.service` failed fast with `pfc-run: workspace pointer is stale: … -> /nonexistent/… (run scripts/relocate from the new location)`, exit `78/CONFIG`, no partial start |
+| Recovery | `scripts/relocate` re-pointed the symlink; API, web and TLS back `active`, HTTPS health `ok` |
+| Authenticated request over TLS after relocation | Login → `200`, `GET /api/v1/accounts` → `200`, `GET /api/v1/safe-to-spend` → `200`, `/dashboard` → `200` |
+
+Service output is appended to `logs/{api,web,tls}.log` in whichever directory the pointer
+resolves to; start/stop and early failures remain in the journal.
 
 ### Authentication probes (live service, HTTPS through Caddy)
 
@@ -244,7 +263,8 @@ value to confirm it fails rather than passing silently. Procedure and failure gu
 
 ```bash
 # Services
-./scripts/install-service            # installs units with @ROOT@ substituted, enables pfc.target
+./scripts/install-service            # installs launcher + static units, points ~/.config/pfc/workspace, enables pfc.target
+./scripts/relocate                   # after moving the checkout: re-points the symlink, restarts
 systemctl --user restart pfc.target
 
 # TLS material (regenerates CA + multi-SAN certificate, exports the CA into the APK)

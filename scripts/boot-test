@@ -66,7 +66,9 @@ collect_units_sync() {
     local inst
     inst="$(unit_value "$u" FragmentPath)"
     [[ -z "$inst" || ! -f "$inst" ]] && { drift=$((drift + 1)); continue; }
-    if ! diff -q <(sed "s|@ROOT@|$ROOT|g" "deploy/systemd/$u") "$inst" >/dev/null 2>&1; then
+    # Unit files are static: they carry no workspace path, so a straight copy
+    # comparison is correct.
+    if ! diff -q "deploy/systemd/$u" "$inst" >/dev/null 2>&1; then
       drift=$((drift + 1))
     fi
   done

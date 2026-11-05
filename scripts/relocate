@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Re-point the supervised stack at this checkout after the workspace moved.
+#
+# The units and the launcher live outside the workspace and contain no project
+# path, so nothing needs reinstalling. All that changes is which directory the
+# workspace symlink resolves to.
+#
+# Usage:
+#   scripts/relocate            # use the directory this script lives in
+#   scripts/relocate /new/path  # explicit target
+set -euo pipefail
+
+ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+ROOT="$(cd "$ROOT" && pwd -P)"
+
+POINTER="${PFC_WORKSPACE_POINTER:-${XDG_CONFIG_HOME:-$HOME/.config}/pfc/workspace}"
+LAUNCHER="$HOME/.local/lib/pfc/pfc-run"
+
+if [[ ! -x "$LAUNCHER" ]]; then
+  echo "Launcher missing at $LAUNCHER; run scripts/install-service once." >&2
+  exit 1
+fi
+for f in backend/app/main.py web/package.json deploy/Caddyfile; do
+  if [[ ! -e "$ROOT/$f" ]]; then
+    echo "$ROOT does not look like the project (missing $f)." >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$(dirname "$POINTER")" "$ROOT/logs"
+ln -sfn "$ROOT" "$POINTER"
+echo "Workspace pointer -> $(readlink "$POINTER")"
+
+# A target restart does not restart its members; stop then start.
+if systemctl --user list-unit-files pfc.target >/dev/null 2>&1; then
+  systemctl --user stop pfc.target >/dev/null 2>&1 || true
+  systemctl --user start pfc.target
+  echo "Restarted pfc.target"
+else
+  echo "pfc.target is not installed; the pointer is updated but nothing was started."
+fi

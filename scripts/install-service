@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
-# Install and start supervised user units for this workspace.
+# Install and start the supervised units for this workspace.
+#
+# Two things get installed, and neither of them contains the workspace path:
+#
+#   ~/.local/lib/pfc/pfc-run        launcher (a copy; survives moving the tree)
+#   ~/.config/systemd/user/pfc.*    units that only call that launcher
+#
+# The workspace location lives in a single symlink,
+# ~/.config/pfc/workspace. Moving the checkout therefore means running
+# scripts/relocate from the new location, not editing units.
 #
 # The legacy single oneshot wrapper (pfc.service, which only started detached
 # children and never supervised them) is retired in place: it is stopped,
-# disabled and renamed to pfc.service.disabled-oneshot so it remains inspectable.
+# disabled and renamed to pfc.service.disabled-oneshot so it stays inspectable.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-mkdir -p "$UNIT_DIR" logs
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pfc"
+LAUNCHER_DIR="$HOME/.local/lib/pfc"
+POINTER="$CONF_DIR/workspace"
+
+mkdir -p "$UNIT_DIR" "$CONF_DIR" "$LAUNCHER_DIR" "$ROOT/logs"
 
 if ! command -v caddy >/dev/null 2>&1; then
   echo "Caddy is required for the TLS front. Install caddy first." >&2
@@ -27,8 +40,15 @@ if [[ -f "$UNIT_DIR/pfc.service" ]]; then
 fi
 "$ROOT/scripts/app" stop >/dev/null 2>&1 || true
 
+# 1. The launcher: a copy at a fixed path, so a moved workspace cannot break it.
+install -m 0755 "$ROOT/deploy/bin/pfc-run" "$LAUNCHER_DIR/pfc-run"
+
+# 2. The pointer: the one place the workspace path is recorded.
+ln -sfn "$ROOT" "$POINTER"
+
+# 3. The units: static files, copied verbatim. No path substitution.
 for unit in pfc-api.service pfc-web.service pfc-tls.service pfc.target; do
-  sed "s|@ROOT@|$ROOT|g" "deploy/systemd/$unit" > "$UNIT_DIR/$unit"
+  install -m 0644 "$ROOT/deploy/systemd/$unit" "$UNIT_DIR/$unit"
 done
 
 chmod +x scripts/wait-for-db
@@ -39,5 +59,7 @@ systemctl --user enable pfc.target >/dev/null
 systemctl --user stop pfc.target >/dev/null 2>&1 || true
 systemctl --user start pfc.target
 
-echo "Installed units from $ROOT into $UNIT_DIR"
-echo "Check with: systemctl --user status pfc-api.service pfc-web.service pfc-tls.service"
+echo "Launcher : $LAUNCHER_DIR/pfc-run"
+echo "Workspace: $POINTER -> $(readlink "$POINTER")"
+echo "Units    : $UNIT_DIR/pfc-{api,web,tls}.service, pfc.target"
+echo "Check    : systemctl --user status pfc.target pfc-api.service pfc-web.service pfc-tls.service"

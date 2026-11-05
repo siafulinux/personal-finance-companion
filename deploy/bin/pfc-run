@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# Stable entry point for the supervised units.
+#
+# The systemd units point at THIS script (installed at
+# ~/.local/lib/pfc/pfc-run), never at the workspace, so moving or renaming the
+# workspace does not invalidate a single unit file. The workspace location lives
+# in one symlink:
+#
+#   ~/.config/pfc/workspace -> /path/to/workspace
+#
+# After a move, re-point that symlink (scripts/relocate does it) and restart the
+# target. The units stay exactly as they are.
+set -euo pipefail
+
+# 78 = EX_CONFIG, the conventional "misconfigured" status for systemd.
+die() { printf 'pfc-run: %s\n' "$*" >&2; exit 78; }
+
+POINTER="${PFC_WORKSPACE_POINTER:-${XDG_CONFIG_HOME:-$HOME/.config}/pfc/workspace}"
+
+ROLE="${1:-}"
+case "$ROLE" in
+  api|web|tls|wait-db|migrate|where) ;;
+  *) die "usage: pfc-run <api|web|tls|wait-db|migrate|where>" ;;
+esac
+
+# Resolve the workspace through the pointer, following symlinks to the real
+# directory so logs and relative paths are stable once we start serving.
+if [[ -L "$POINTER" ]]; then
+  # A dangling symlink is the classic symptom of a moved workspace.
+  if [[ ! -d "$POINTER" ]]; then
+    die "workspace pointer is stale: $POINTER -> $(readlink "$POINTER") (run scripts/relocate from the new location)"
+  fi
+elif [[ ! -d "$POINTER" ]]; then
+  die "no workspace pointer at $POINTER (run scripts/install-service)"
+fi
+ROOT="$(cd "$POINTER" && pwd -P)"
+
+if [[ "$ROLE" == "where" ]]; then
+  printf '%s\n' "$ROOT"
+  exit 0
+fi
+
+# Fail with a sentence rather than systemd's bare "No such file or directory"
+# when the pointer lands somewhere that is not this project.
+require() {
+  [[ -e "$ROOT/$1" ]] || die "$ROOT does not look like the project: missing $1"
+}
+
+# Load the workspace .env here rather than in the unit, so the unit carries no
+# path of its own.
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+fi
+
+mkdir -p "$ROOT/logs"
+
+# Append to the workspace log file before exec so the service log follows the
+# workspace too. systemd still records start/stop and early failures in the
+# journal.
+log_to() {
+  exec >>"$ROOT/logs/$1.log" 2>&1
+  printf '\n=== %s pfc-run %s from %s\n' "$(date -Is)" "$ROLE" "$ROOT"
+}
+
+case "$ROLE" in
+  wait-db)
+    require scripts/wait-for-db
+    exec "$ROOT/scripts/wait-for-db"
+    ;;
+
+  migrate)
+    require backend/.venv/bin/alembic
+    cd "$ROOT/backend"
+    exec ./.venv/bin/alembic upgrade head
+    ;;
+
+  api)
+    require backend/.venv/bin/uvicorn
+    log_to api
+    cd "$ROOT/backend"
+    # Exactly one worker: the login rate limiter is per-process.
+    exec ./.venv/bin/uvicorn app.main:app \
+      --host "${API_HOST:-127.0.0.1}" \
+      --port "${API_PORT:-8010}" \
+      --workers 1 \
+      --proxy-headers \
+      --forwarded-allow-ips 127.0.0.1
+    ;;
+
+  web)
+    require web/package.json
+    log_to web
+    cd "$ROOT/web"
+    exec /usr/bin/npm run dev
+    ;;
+
+  tls)
+    require deploy/Caddyfile
+    log_to tls
+    # Exported here instead of in the unit, for the same reason: no paths in the
+    # unit file.
+    export PFC_TLS_CERT="$ROOT/certs/pfc-server.crt"
+    export PFC_TLS_KEY="$ROOT/certs/pfc-server.key"
+    cd "$ROOT"
+    exec /usr/bin/caddy run --config "$ROOT/deploy/Caddyfile" --adapter caddyfile
+    ;;
+esac

@@ -1,8 +1,7 @@
 [Unit]
 Description=Personal Finance Companion (database, API, web, TLS)
-After=network-online.target
+After=network-online.target pfc-api.service pfc-web.service pfc-tls.service
 Wants=network-online.target pfc-api.service pfc-web.service pfc-tls.service
-After=pfc-api.service pfc-web.service
 AllowIsolate=yes
 
 [Install]

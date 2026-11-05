@@ -1,6 +1,5 @@
 [Unit]
-Description=Personal Finance Companion web (Vite)
-Documentation=file://@ROOT@/docs/android.md
+Description=Personal Finance Companion web UI (Vite dev server)
 After=network-online.target pfc-api.service
 Wants=network-online.target
 PartOf=pfc.target
@@ -9,16 +8,13 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=@ROOT@/web
-EnvironmentFile=-@ROOT@/.env
-Environment=NODE_ENV=development
-ExecStart=/usr/bin/npm run dev
+ExecStart=%h/.local/lib/pfc/pfc-run web
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=20
 KillSignal=SIGTERM
-StandardOutput=append:@ROOT@/logs/web.log
-StandardError=append:@ROOT@/logs/web.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=pfc.target

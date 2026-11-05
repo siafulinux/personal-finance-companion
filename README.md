@@ -79,13 +79,40 @@ browser, because the cookie is `Secure`. Use the HTTPS URL.
 ### Running as a service
 
 ```bash
-scripts/install-service          # renders deploy/systemd units and enables pfc.target
+scripts/install-service             # install launcher + units, enable pfc.target, start it
 systemctl --user start pfc.target   # or restart/stop; one handle for the whole stack
 ```
 
-`pfc.target` brings up the API, web app and TLS front. The API waits for the database,
-applies migrations before serving, restarts on failure, and runs a single worker so the
-login limiter keeps its guarantee. Logs are appended to `logs/`.
+`pfc.target` brings up the API, web app and TLS front. Each runs as its own supervised unit,
+so a crash restarts only that process. The API waits for the database, applies migrations
+before serving, restarts on failure, and runs a single worker so the login limiter keeps its
+guarantee. Service logs are appended to `logs/`; start/stop and early failures are in
+`journalctl --user -u pfc-api.service`.
+
+#### The units do not contain this project's path
+
+Installing puts two things outside the workspace:
+
+```
+~/.local/lib/pfc/pfc-run            launcher: every unit's ExecStart calls this
+~/.config/pfc/workspace -> <this checkout>
+~/.config/systemd/user/pfc-*.service, pfc.target
+```
+
+The launcher resolves the workspace through that one symlink and loads `.env`, sets paths and
+starts the right process. Because the units reference only the launcher, **moving the project
+does not invalidate them** — no path substitution, no reinstall.
+
+After moving (or renaming) the checkout, run this from the new location:
+
+```bash
+scripts/relocate        # re-points the symlink and restarts pfc.target
+```
+
+If the symlink points at a directory that no longer exists, the units fail fast with
+`pfc-run: workspace pointer is stale: … (run scripts/relocate from the new location)` in the
+journal, instead of a bare "No such file or directory". Check what is being served with
+`~/.local/lib/pfc/pfc-run where`.
 
 ### Demo account
 
