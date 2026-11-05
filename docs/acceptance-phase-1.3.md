@@ -165,6 +165,23 @@ Limitations: the hashes cover table contents, not indexes, constraints, sequence
 ownership; a table only present on one side is reported as `MISSING`/`EXTRA` and counts as a
 failure.
 
+### Scheduled backups (live)
+
+`scripts/backup-routine` chains dump → content verification → prune, and
+`pfc-backup.timer` runs it Sundays 03:00 with `Persistent=true`. Procedural detail is in
+`docs/backups.md`.
+
+| Test | Observed |
+| --- | --- |
+| `scripts/backup-routine` by hand | new dump written (73.1 KiB), 19/19 tables content-identical, prune no-op at 4 of 8, exit `0` |
+| Retention, `PFC_BACKUP_KEEP=3` over 6 dumps in a temporary directory | 3 oldest pruned; the new verified dump plus the two next-newest kept; exit `0` |
+| Database stopped, `PFC_BACKUP_KEEP=1` | `FAIL backup failed; nothing pruned`, exit `1`, dump count unchanged (4) — retention did not delete anything after a failure |
+| `systemctl --user start pfc-backup.service` | `Result=success`, `ExecMainStatus=0`, dump created and verified in the journal |
+| `./scripts/install-service`, then `list-timers` | `pfc-backup.timer` `active`, next elapse Sun 2026-11-08 03:07 EST; API/web/TLS still `active`, HTTPS health `ok` |
+
+The routine has no off-site copy and does not encrypt dumps; both are recorded as open risks
+in `docs/backups.md`.
+
 ### Authentication probes (live service, HTTPS through Caddy)
 
 | Probe | Result |

@@ -47,16 +47,21 @@ install -m 0755 "$ROOT/deploy/bin/pfc-run" "$LAUNCHER_DIR/pfc-run"
 ln -sfn "$ROOT" "$POINTER"
 
 # 3. The units: static files, copied verbatim. No path substitution.
-for unit in pfc-api.service pfc-web.service pfc-tls.service pfc.target; do
+for unit in pfc-api.service pfc-web.service pfc-tls.service pfc.target \
+  pfc-backup.service pfc-backup.timer; do
   install -m 0644 "$ROOT/deploy/systemd/$unit" "$UNIT_DIR/$unit"
 done
 
-chmod +x scripts/wait-for-db
+chmod +x scripts/wait-for-db scripts/backup-routine
 
 systemctl --user daemon-reload
 # Enable the units themselves as well as the target, so each is individually
 # enabled for boot and not only pulled in by the target's Wants=.
 systemctl --user enable pfc.target pfc-api.service pfc-web.service pfc-tls.service >/dev/null
+# The backup service has no [Install] section: the timer is what gets enabled,
+# and it must be started as well, or nothing is scheduled until the next login.
+systemctl --user enable pfc-backup.timer >/dev/null
+systemctl --user start pfc-backup.timer
 # A target restart does not restart its members; stop then start the target.
 systemctl --user stop pfc.target >/dev/null 2>&1 || true
 systemctl --user start pfc.target
@@ -64,4 +69,5 @@ systemctl --user start pfc.target
 echo "Launcher : $LAUNCHER_DIR/pfc-run"
 echo "Workspace: $POINTER -> $(readlink "$POINTER")"
 echo "Units    : $UNIT_DIR/pfc-{api,web,tls}.service, pfc.target"
+echo "Backup   : $UNIT_DIR/pfc-backup.{service,timer}; next run: systemctl --user list-timers pfc-backup.timer"
 echo "Check    : systemctl --user status pfc.target pfc-api.service pfc-web.service pfc-tls.service"

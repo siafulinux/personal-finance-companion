@@ -134,6 +134,7 @@ Demo data is visibly marked in both apps and can be removed with `./scripts/app 
 ./scripts/app build-web     # production web build
 ./scripts/app backup        # compressed PostgreSQL dump in ./backups (refuses an empty dump)
 ./scripts/app verify-backup  # restore newest dump into a scratch DB and compare every table's content
+./scripts/backup-routine     # dump + verify + prune; what pfc-backup.timer runs weekly
 ./scripts/app restore FILE  # restore a dump (replaces current data)
 ./scripts/app doctor        # runtimes, migrations, configuration, ports
 ```
@@ -195,6 +196,7 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 - [Phase 1.1 report](docs/acceptance-phase-1.1.md) — Android transaction/import tests and results.
 - [Phase 1.2 report](docs/acceptance-phase-1.2.md) — end-to-end validation, hardening, backup/restore and security evidence.
 - [Phase 1.3 report](docs/acceptance-phase-1.3.md) — recovery gate, service supervision, LAN TLS, session revocation and remaining risks.
+- [Backups](docs/backups.md) — the weekly dump/verify/prune routine, retention, restore drill and what it does not cover.
 - [Reboot verification](docs/boot-verification.md) — how to prove the supervised stack returns after a reboot, and what to check when it does not.
 - [Changelog](CHANGELOG.md) — release history, including the 2026-11-03 data loss and the restore that produced the `v0.1.0-recovered` baseline.
 

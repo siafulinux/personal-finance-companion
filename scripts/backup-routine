@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Weekly backup routine: dump, prove the dump by restoring it, then prune.
+#
+# Steps, in this order and deliberately not reordered:
+#   1. take a dump (refuses to keep one with no table data)
+#   2. verify it by content against the live database (scratch restore)
+#   3. only if 1 and 2 succeeded, delete dumps beyond the retention count
+#
+# A failed step leaves older backups untouched, so a bad night can never be the
+# night the good copies were pruned. A dump that fails verification is moved to
+# backups/rejected/ instead of being left looking like a usable backup.
+#
+# Scheduled by pfc-backup.timer (Sundays 03:00, persistent). Safe to run by hand:
+#   scripts/backup-routine
+#
+# Environment:
+#   PFC_BACKUP_KEEP   number of dumps to keep (default 8 = eight weeks)
+#   PFC_BACKUP_DIR    where dumps live (default <workspace>/backups)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
+
+KEEP="${PFC_BACKUP_KEEP:-8}"
+if ! [[ "$KEEP" =~ ^[1-9][0-9]*$ ]]; then
+  echo "PFC_BACKUP_KEEP must be a positive integer, got '$KEEP'" >&2
+  exit 1
+fi
+
+BACKUP_DIR="${PFC_BACKUP_DIR:-$ROOT/backups}"
+REJECTED_DIR="$BACKUP_DIR/rejected"
+LOG_DIR="$ROOT/logs"
+mkdir -p "$BACKUP_DIR" "$LOG_DIR"
+
+# Everything this run says goes to the log file and to stdout (the journal).
+exec > >(tee -a "$LOG_DIR/backup.log") 2>&1
+
+say() { printf '[%s] %s\n' "$(date -Is)" "$*"; }
+fail() { say "FAIL $*"; exit 1; }
+
+PFC="$ROOT/backend/.venv/bin/pfc"
+[[ -x "$PFC" ]] || fail "backend virtualenv missing ($PFC); run scripts/install-service or rebuild it"
+
+say "=== backup routine start (keep=$KEEP) ==="
+
+# 1. Dump. The CLI already refuses to keep a dump with no table data.
+STAMP="$(date +%Y%m%d-%H%M%S)"
+DUMP="$BACKUP_DIR/finance-$STAMP.dump"
+say "step 1/3 dump   -> $(basename "$DUMP")"
+if ! "$PFC" backup -o "$DUMP" | sed 's/^/                 /'; then
+  rm -f "$DUMP"
+  fail "backup failed; nothing pruned"
+fi
+[[ -f "$DUMP" ]] || fail "backup reported success but wrote no file; nothing pruned"
+
+# 2. Verify by content: restore into a scratch database and compare every table.
+say "step 2/3 verify -> restoring into a scratch database and comparing content"
+if ! "$PFC" verify-backup "$DUMP" | sed 's/^/                 /'; then
+  mkdir -p "$REJECTED_DIR"
+  mv -f "$DUMP" "$REJECTED_DIR/$(basename "$DUMP").unverified"
+  fail "verification failed; dump moved to backups/rejected/ and nothing pruned"
+fi
+
+# 3. Prune, newest first. Only real dumps are touched; rejected/ is never pruned.
+mapfile -t dumps < <(
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name 'finance-*.dump' \
+    -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-
+)
+say "step 3/3 prune  -> ${#dumps[@]} dump(s) present, keeping $KEEP"
+kept=0
+for f in "${dumps[@]}"; do
+  kept=$((kept + 1))
+  if (( kept > KEEP )); then
+    # Never delete the dump this run just verified, even if the clock or a
+    # restored file order says otherwise.
+    if [[ "$f" == "$DUMP" ]]; then
+      say "                 keeping current dump despite retention count"
+      continue
+    fi
+    rm -f "$f" && say "                 pruned $(basename "$f")"
+  fi
+done
+
+say "OK routine complete: $(basename "$DUMP") verified, $((kept > KEEP ? KEEP : kept)) kept"

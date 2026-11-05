@@ -1,0 +1,17 @@
+[Unit]
+Description=Personal Finance Companion verified database backup
+After=network-online.target docker.service
+Wants=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=2
+
+[Service]
+Type=oneshot
+ExecStartPre=%h/.local/lib/pfc/pfc-run wait-db
+ExecStart=%h/.local/lib/pfc/pfc-run backup
+# Backups are I/O heavy but never urgent; stay out of the way of the app.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal

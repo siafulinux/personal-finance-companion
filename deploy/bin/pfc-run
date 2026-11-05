@@ -19,8 +19,8 @@ POINTER="${PFC_WORKSPACE_POINTER:-${XDG_CONFIG_HOME:-$HOME/.config}/pfc/workspac
 
 ROLE="${1:-}"
 case "$ROLE" in
-  api|web|tls|wait-db|migrate|where) ;;
-  *) die "usage: pfc-run <api|web|tls|wait-db|migrate|where>" ;;
+  api|web|tls|backup|wait-db|migrate|where) ;;
+  *) die "usage: pfc-run <api|web|tls|backup|wait-db|migrate|where>" ;;
 esac
 
 # Resolve the workspace through the pointer, following symlinks to the real
@@ -95,6 +95,13 @@ case "$ROLE" in
     log_to web
     cd "$ROOT/web"
     exec /usr/bin/npm run dev
+    ;;
+
+  backup)
+    # The routine logs itself to logs/backup.log; adding log_to here would
+    # duplicate every line.
+    require scripts/backup-routine
+    exec "$ROOT/scripts/backup-routine"
     ;;
 
   tls)

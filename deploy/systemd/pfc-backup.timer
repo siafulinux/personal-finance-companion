@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly verified database backup (Sundays 03:00)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=600
+# Run a missed backup after the machine next boots rather than skipping a week.
+Persistent=true
+Unit=pfc-backup.service
+
+[Install]
+WantedBy=timers.target

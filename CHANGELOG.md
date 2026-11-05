@@ -28,7 +28,12 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 - **Restore rehearsed.** The newest dump was restored into a scratch database, compared
   table-by-table against production (19/19 identical, same `alembic_version`) and the scratch
   database dropped.
-- **`pfc verify-backup [dump]`.** Restores a dump into a scratch database, hashes every row
+- **Weekly verified backup routine.** `scripts/backup-routine` dumps, verifies the dump by
+  content against production, then prunes; `pfc-backup.timer` runs it Sundays at 03:00
+  (`Persistent=true`, so a missed run catches up after boot). A failed dump or a failed
+  verification aborts before pruning, and an unverified dump is moved to `backups/rejected/`.
+  Retention defaults to eight dumps (`PFC_BACKUP_KEEP`). Documented in `docs/backups.md`.
+- **`pfc verify-backup [dump]`. Restores a dump into a scratch database, hashes every row
   of every public table and compares the digests with production, so a backup that restores
   with the right row counts but wrong contents is rejected. The scratch database is always
   dropped, and the command defaults to the newest dump in `backups/`.
