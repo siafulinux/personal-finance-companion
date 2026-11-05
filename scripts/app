@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# Personal Finance Companion - project-local operations wrapper.
+# Everything runs from this directory; ports come from .env. No system services.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+API_HOST="${API_HOST:-127.0.0.1}"
+API_PORT="${API_PORT:-8010}"
+WEB_HOST="${WEB_HOST:-127.0.0.1}"
+WEB_PORT="${WEB_PORT:-5183}"
+DB_PORT="${DB_PORT:-55432}"
+DB_CONTAINER="${DB_CONTAINER:-pfc-db}"
+PFC="backend/.venv/bin/pfc"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/app <command>
+
+Development:
+  dev            start database + migrations, then run API and web in the foreground
+  start          start database, migrations, API and web in the background (pid files)
+  stop           stop the API and web processes this project started
+  status         check database, API and web
+
+Data and quality:
+  migrate        apply Alembic migrations
+  seed           create flagged demo data
+  seed-remove    delete the demo account and its data
+  test           run backend tests
+  test-web       run frontend tests
+  build-web      production build of the web app
+  backup         write a database dump into ./backups
+  restore FILE   restore a dump (replaces current data)
+  doctor         environment and configuration checks
+  logs           tail API and web logs
+
+Ports are configurable in .env. The wrapper never kills processes it did not start.
+USAGE
+}
+
+need_db() {
+  if ! docker ps --format '{{.Names}}' | grep -qx "$DB_CONTAINER"; then
+    echo "Starting project database container…"
+    docker compose up -d db >/dev/null
+  fi
+  for _ in $(seq 1 40); do
+    if docker exec "$DB_CONTAINER" pg_isready -U "${POSTGRES_USER:-finance}" -d "${POSTGRES_DB:-finance}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "Database did not become ready. Check: docker compose logs db" >&2
+  return 1
+}
+
+pid_running() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  local pid
+  pid="$(cat "$file" 2>/dev/null || true)"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+free_port() {
+  local port="$1"
+  ! ss -ltn "sport = :$port" 2>/dev/null | grep -q LISTEN
+}
+
+start_api() {
+  mkdir -p logs .pids
+  if pid_running .pids/api.pid; then
+    echo "API already running (pid $(cat .pids/api.pid))"
+    return 0
+  fi
+  if ! free_port "$API_PORT"; then
+    echo "API port $API_PORT is already in use. Set API_PORT in .env." >&2
+    return 1
+  fi
+  (
+    cd backend
+    setsid bash -c "exec .venv/bin/uvicorn app.main:app --host '$API_HOST' --port '$API_PORT'" \
+      >> ../logs/api.log 2>&1 < /dev/null &
+    echo $! > ../.pids/api.pid
+  )
+  for _ in $(seq 1 40); do
+    if curl -sf "http://$API_HOST:$API_PORT/api/v1/health" >/dev/null 2>&1; then
+      echo "API listening on http://$API_HOST:$API_PORT"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "API failed to start. Last log lines:" >&2
+  tail -n 20 logs/api.log >&2
+  return 1
+}
+
+start_web() {
+  mkdir -p logs .pids
+  if pid_running .pids/web.pid; then
+    echo "Web already running (pid $(cat .pids/web.pid))"
+    return 0
+  fi
+  if [[ ! -d web/node_modules ]]; then
+    echo "Web dependencies missing. Run: (cd web && npm install)" >&2
+    return 1
+  fi
+  if ! free_port "$WEB_PORT"; then
+    echo "Web port $WEB_PORT is already in use. Set WEB_PORT in .env." >&2
+    return 1
+  fi
+  (
+    cd web
+    setsid bash -c "exec npm run dev" >> ../logs/web.log 2>&1 < /dev/null &
+    echo $! > ../.pids/web.pid
+  )
+  for _ in $(seq 1 60); do
+    if curl -sf "http://$WEB_HOST:$WEB_PORT/" >/dev/null 2>&1; then
+      echo "Web listening on http://$WEB_HOST:$WEB_PORT"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "Web failed to start. Last log lines:" >&2
+  tail -n 20 logs/web.log >&2
+  return 1
+}
+
+stop_pidfile() {
+  local file="$1" label="$2"
+  if ! pid_running "$file"; then
+    echo "$label is not running"
+    rm -f "$file"
+    return 0
+  fi
+  local pid
+  pid="$(cat "$file")"
+  # setsid makes the recorded pid a process-group leader; stop only that group.
+  kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+  done
+  rm -f "$file"
+  echo "$label stopped"
+}
+
+case "${1:-}" in
+  dev)
+    need_db
+    "$PFC" migrate
+    "$PFC" dev &
+    api=$!
+    (cd web && npm run dev) &
+    web=$!
+    trap 'kill $api $web 2>/dev/null || true' INT TERM EXIT
+    wait
+    ;;
+  start)
+    need_db
+    "$PFC" migrate
+    start_api
+    start_web
+    echo "Open http://$WEB_HOST:$WEB_PORT"
+    ;;
+  stop)
+    stop_pidfile .pids/web.pid "Web"
+    stop_pidfile .pids/api.pid "API"
+    ;;
+  status)
+    docker exec "$DB_CONTAINER" pg_isready -U "${POSTGRES_USER:-finance}" -d "${POSTGRES_DB:-finance}" >/dev/null 2>&1 \
+      && echo "Database: ready on 127.0.0.1:$DB_PORT" \
+      || echo "Database: not ready"
+    if curl -sf "http://$API_HOST:$API_PORT/api/v1/health" >/dev/null 2>&1; then
+      echo "API: healthy at http://$API_HOST:$API_PORT"
+    else
+      echo "API: not responding at http://$API_HOST:$API_PORT"
+    fi
+    if curl -sf "http://$WEB_HOST:$WEB_PORT/" >/dev/null 2>&1; then
+      echo "Web: healthy at http://$WEB_HOST:$WEB_PORT"
+    else
+      echo "Web: not responding at http://$WEB_HOST:$WEB_PORT"
+    fi
+    ;;
+  migrate) "$PFC" migrate ;;
+  seed) "$PFC" seed-demo ;;
+  seed-remove) "$PFC" seed-demo --remove --yes ;;
+  test) "$PFC" test ;;
+  test-web) (cd web && npm test) ;;
+  build-web) (cd web && npm run build) ;;
+  backup) "$PFC" backup ;;
+  restore) shift; "$PFC" restore "$@" ;;
+  doctor)
+    need_db || true
+    "$PFC" doctor
+    ;;
+  logs)
+    tail -n 40 logs/api.log logs/web.log 2>/dev/null || true
+    ;;
+  ""|-h|--help|help) usage ;;
+  *) echo "Unknown command: $1" >&2; usage; exit 1 ;;
+esac
