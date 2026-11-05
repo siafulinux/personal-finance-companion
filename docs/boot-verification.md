@@ -27,8 +27,10 @@ informational and never fail the run.
 
 ### 1. Take the baseline
 
-Any legitimate financial activity between the snapshot and the reboot will show up as a
-difference, so take the snapshot as the last step before rebooting.
+The snapshot is compared including the git revision, so take it **after** your last commit
+and as the very last step before rebooting. Any commit or legitimate financial activity in
+between will legitimately show up as a difference (that is the point — the run proves the
+same code and the same data came back).
 
 ```bash
 export PFC_BOOT_EMAIL='you@example.com'
@@ -38,7 +40,10 @@ scripts/boot-test snapshot      # writes logs/boot-test/pre-boot.txt
 ```
 
 Use the same account for both runs. Without credentials the authenticated checks are
-reported as `SKIP` and the verdict says so — it never claims them as passed.
+reported as `SKIP` and the verdict says so — it never claims them as passed. If the
+baseline contains authenticated values and the `verify` run has no credentials, those
+comparisons fail with "baseline has a value but no credentials were supplied" rather than
+silently passing.
 
 The snapshot contains no credentials and no amounts beyond the three figures above; the
 session token exists only in a temporary cookie jar that is removed on exit.
@@ -87,8 +92,9 @@ cp logs/boot-test/pre-boot.txt "logs/boot-test/post-boot-$(date +%Y%m%d-%H%M).tx
 
 ## Status
 
-- **Baseline captured:** 2026-11-05, commit `4b09b96`, 38 comparisons, all matching, on a
-  stack that had been up for ~1 day 21 hours.
+- **Baseline captured:** 2026-11-05, commit at the time of the run, 38 comparisons, all
+  matching, on a stack that had been up for ~1 day 21 hours (`logs/boot-test/pre-boot.txt`,
+  git-ignored). Re-take it after any commit, as described above.
 - **Reboot executed:** no. The procedure is prepared and the harness is self-tested (a
   deliberate one-value change is detected and exits non-zero); the boot itself has not
   happened, so automatic startup remains **unverified**.
