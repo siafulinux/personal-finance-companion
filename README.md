@@ -53,11 +53,39 @@ cd ..
 ./scripts/app start            # database + migrations + API + web
 ```
 
-- Web app: <http://127.0.0.1:5183>
-- API: <http://127.0.0.1:8010/api/v1/health>
-- API docs: <http://127.0.0.1:8010/api/docs>
+- Web app: <https://127.0.0.1:8443>
+- API: <https://127.0.0.1:8443/api/v1/health>
+- API docs: <https://127.0.0.1:8443/api/docs>
 
 The ports are configurable in `.env`; the defaults avoid the often-occupied 5173/8000.
+
+### HTTPS and the project CA
+
+Session cookies are `Secure` and CORS only allows the HTTPS origins, so the app is reached
+over TLS through a local Caddy front on **8443** (`443` is often taken by another
+service). `scripts/gen-tls` creates one long-lived project CA and a server certificate
+covering `localhost`, `127.0.0.1`, `10.0.2.2` (the emulator's view of the host) and the
+LAN address, so the app works whichever name you use without ever disabling certificate
+verification.
+
+A browser will warn until it trusts that CA. Import `certs/pfc-ca.crt` into your browser or
+OS trust store once per machine (for the web app). The Android app already trusts it via
+`res/raw/pfc_ca.crt`. If the CA or the LAN address changes, re-run `scripts/gen-tls &&
+scripts/export-ca` and rebuild the APK.
+
+Plain `http://127.0.0.1:5183` still serves the SPA but a login there is discarded by the
+browser, because the cookie is `Secure`. Use the HTTPS URL.
+
+### Running as a service
+
+```bash
+scripts/install-service          # renders deploy/systemd units and enables pfc.target
+systemctl --user start pfc.target   # or restart/stop; one handle for the whole stack
+```
+
+`pfc.target` brings up the API, web app and TLS front. The API waits for the database,
+applies migrations before serving, restarts on failure, and runs a single worker so the
+login limiter keeps its guarantee. Logs are appended to `logs/`.
 
 ### Demo account
 
@@ -87,12 +115,12 @@ The backend CLI exposes the same operations directly: `backend/.venv/bin/pfc --h
 ## Tests
 
 ```bash
-cd backend && .venv/bin/python -m pytest -q     # 81 tests, scenarios A-J plus Phase 1.2 edge cases
+cd backend && .venv/bin/python -m pytest -q     # 87 tests, scenarios A-J plus Phase 1.2/1.3 cases
 cd web && npm test                              # 9 component/format tests
 cd android && ./gradlew :app:testDebugUnitTest  # 31 repository, ViewModel and format tests
 ```
 
-The backend suite runs against a separate `finance_test` database and covers the acceptance scenarios A-J, plus authentication, CSRF, ownership isolation, duplicate detection, and edge cases (negative Safe-to-Spend, stale balances, ambiguous matches).
+The backend suite runs against a separate `finance_test` database and covers the acceptance scenarios A-J, plus authentication, CSRF, ownership isolation, duplicate detection, session revocation, throttling and edge cases (negative Safe-to-Spend, stale balances, ambiguous matches).
 
 ## Android app
 
@@ -112,8 +140,8 @@ The app is a full participant in the ledger, not a read-only companion:
 - **Bill matching** stays server-side. Automatic matches are reported after saving; suggested and ambiguous matches wait under **Bills** for confirm or reject.
 - The app requests no storage permission, keeps only the token, server URL and theme on the device, and refreshes dashboard, budgets, bills and Safe-to-Spend from the server.
 
-- The default API address is `http://10.0.2.2:8010/api/v1/` (the host machine from an emulator). For a physical device, open **Settings → Server address** in the app and enter your machine's LAN URL.
-- Cleartext HTTP is enabled for local development; point the app at HTTPS before shipping.
+- The default API address is `https://10.0.2.2:8443/api/v1/` (the host machine from an emulator, through the TLS front). For a physical device, open **Settings → Server address** and enter your machine's LAN URL.
+- HTTPS is required outside loopback and the project CA is bundled in the APK; certificate verification is never disabled. The bearer token is encrypted with an Android Keystore key, and signing out revokes it server-side.
 - If your system JDK is broken or older than 17, run Gradle with a JDK 17: `JAVA_HOME=/path/to/jdk-17 ./gradlew ...`.
 - See [docs/android.md](docs/android.md) for the form rules, import workflow and security notes.
 
@@ -125,7 +153,8 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 
 - Financial arithmetic is server-side and exact; the browser never computes balances.
 - Every query is scoped to the authenticated user; cross-user access is covered by tests.
-- Browser sessions use httpOnly cookies with CSRF protection on state changes; non-browser clients use bearer tokens.
+- Browser sessions use httpOnly cookies with CSRF protection on state changes; non-browser clients use bearer tokens. Signing out revokes the token's ID server-side, so it stops working from every client.
+- Transport is TLS with a pinned project CA; the API and web server bind to loopback and only the TLS front listens on the network. Login attempts are throttled per address and account (429 when tripped).
 - Responses are `no-store`; security headers are applied globally; passwords use Argon2id; login errors are generic.
 - No external analytics, bank aggregators, or AI calls in Phase 1. Location is not requested or stored.
 
@@ -137,6 +166,7 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 - [Acceptance report](docs/acceptance.md) — scenarios A-J and what was verified manually.
 - [Phase 1.1 report](docs/acceptance-phase-1.1.md) — Android transaction/import tests and results.
 - [Phase 1.2 report](docs/acceptance-phase-1.2.md) — end-to-end validation, hardening, backup/restore and security evidence.
+- [Phase 1.3 report](docs/acceptance-phase-1.3.md) — recovery gate, service supervision, LAN TLS, session revocation and remaining risks.
 
 ## Limits
 

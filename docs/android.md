@@ -114,8 +114,15 @@ Compose screen → ViewModel → FinanceRepository → ApiClient (OkHttp)
 - Only the access token, server URL and theme are stored on the device (DataStore).
 - The ledger, accounts, bills and budgets are fetched on demand; there is no separate
   financial cache that could disagree with the web app.
-- The default base URL is `http://10.0.2.2:8010/api/v1/` for an emulator; set a LAN or
-  HTTPS URL in **Settings → Server address** for other devices.
+- The default base URL is `https://10.0.2.2:8443/api/v1/` — the host machine as seen from
+  an emulator, through the Caddy TLS front. For a physical device, set the LAN URL in
+  **Settings → Server address**.
+- The session token lives in `SecureTokenStore`: encrypted with an AES/GCM key held by the
+  Android Keystore, never in plain preferences. Only the server URL and theme stay in
+  DataStore.
+- Signing out calls `POST /auth/logout`, which records the token ID server-side, so the
+  token stops working immediately even if it was copied off the device. Expired or revoked
+  tokens produce a `401` and the app returns to the sign-in screen.
 
 ## Build and test
 
@@ -126,13 +133,37 @@ cd android
 ./gradlew :app:assembleDebugAndroidTest
 ```
 
-If the system JDK is broken or older than 17, point `JAVA_HOME` at a JDK 17. This
+If the system JDK is broken or newer than 17, point `JAVA_HOME` at a JDK 17 — Gradle 8.11.1
+fails on JDK 25 with a bare `25.0.5` error. This
 workspace uses a project-local JDK and Gradle under `.tools/` (gitignored):
 
 ```bash
 JAVA_HOME=../.tools/jdk17 PATH=../.tools/jdk17/bin:$PATH \
   ../.tools/gradle-8.11.1/bin/gradle :app:assembleDebug
 ```
+
+## Installing on a physical device
+
+The APK is not tied to the emulator, but the server must be reachable over HTTPS from the
+device:
+
+1. **Build** the debug APK (see above) — `app/build/outputs/apk/debug/app-debug.apk`.
+2. **Enable developer options and USB debugging** on the phone, then confirm the host sees
+   it: `adb devices`.
+3. **Install**: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
+4. **Point the app at the server** in **Settings → Server address**:
+   `https://<host-lan-ip>:8443/api/v1/` (the certificate covers the LAN address recorded in
+   `PFC_LAN_IP` when `scripts/gen-tls` last ran; re-run it if the address changed, then
+   rebuild the APK so the bundled CA resource is current).
+5. **Sign in** with a real account. No certificate warning appears: the project CA is
+   bundled, and verification stays enabled.
+
+The phone must be on the same trusted network as the host. If it cannot connect, check
+that the host firewall allows TCP 8443 — the API and web server themselves listen on
+loopback only.
+
+No runtime permissions are needed: there is no storage, location or contacts request, and
+CSV files are read through the system document picker.
 
 ## Security notes
 
@@ -142,12 +173,25 @@ JAVA_HOME=../.tools/jdk17 PATH=../.tools/jdk17/bin:$PATH \
   storage.
 - Credentials and tokens are never logged; API errors are reduced to readable messages
   without exposing server internals.
-- Cleartext HTTP is enabled only for local development. Point the app at HTTPS before
-  distributing it.
+- HTTPS with certificate verification is mandatory. The project CA that signs the server
+  certificate is bundled at `res/raw/pfc_ca.crt` and trusted through
+  `res/xml/network_security_config.xml`; the app does not trust every user CA, and it never
+  runs with verification disabled. Debug builds additionally accept a user-installed CA
+  for ad-hoc troubleshooting.
+- Cleartext is permitted only for `127.0.0.1` and `localhost`, so `adb reverse` debugging
+  keeps working. Every other host must be HTTPS.
+- The bundled CA is a public certificate; the CA private key never leaves `certs/` on the
+  server machine. Run `scripts/gen-tls && scripts/export-ca` and rebuild the APK if the CA
+  or the LAN address changes.
+- Trusting the CA on a desktop browser (for the web app) is a separate, manual step — see
+  the README.
 
 ## Current limits
 
-- No offline mode; the app requires the backend.
+- No offline mode; the app requires the backend, and it must be reachable over HTTPS with
+  the project CA trusted.
+- Only the emulator was used for end-to-end verification in Phase 1.3; no physical device
+  has been tested.
 - Onboarding can create an opening account. Categories, budgets and bills are created and
   edited in the web app; Android can record, correct and import transactions, mark bills
   paid and confirm matches.
