@@ -132,6 +132,26 @@ the tree moved during recovery. The units now contain no project path at all. Ea
 Service output is appended to `logs/{api,web,tls}.log` in whichever directory the pointer
 resolves to; start/stop and early failures remain in the journal.
 
+### Backup safety and restore rehearsal (live)
+
+`pfc backup` now verifies its own output: it counts `TABLE DATA` entries with
+`pg_restore --list` and deletes the file, exiting non-zero, if there are none. A failed
+`pg_dump` no longer leaves a partial file. The empty `finance-20261104-151726.dump`
+(836 bytes, 4 TOC entries, zero table data) was deleted; it would have restored to nothing.
+
+Restoring the newest dump (`finance-20261105-110231.dump`, 74,866 bytes) into a scratch
+database was rehearsed end to end:
+
+| Step | Observed |
+| --- | --- |
+| `createdb finance_restore_rehearsal` then `pg_restore --no-owner --exit-on-error` | exit `0`, empty stderr, 19 tables created |
+| `alembic_version` in the restored copy | `b9cb28b8b1a5`, identical to production |
+| Row counts for all 19 tables, production vs restored | identical in every table — e.g. users 6/6, transactions 32/32, bill_occurrences 141/141, categories 115/115, budgets 4/4, bills 12/12, bill_payment_matches 4/4 |
+| Cleanup | scratch database dropped; `finance` and `finance_test` remain; production still `6 \| 32 \| 12` at `b9cb28b8b1a5`, HTTPS health `ok` |
+
+Only row counts and the schema revision were compared; the rehearsal did not diff column
+values or row contents.
+
 ### Authentication probes (live service, HTTPS through Caddy)
 
 | Probe | Result |

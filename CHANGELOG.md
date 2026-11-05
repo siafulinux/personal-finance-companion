@@ -25,6 +25,9 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
   clearing cookies.
 - **Android secure token storage.** The bearer token moved from plain preferences into a
   Keystore-encrypted store (AES/GCM).
+- **Restore rehearsed.** The newest dump was restored into a scratch database, compared
+  table-by-table against production (19/19 identical, same `alembic_version`) and the scratch
+  database dropped.
 - **Reboot verification harness.** `scripts/boot-test snapshot|verify` records and diffs the
   unit state, certificate, schema revision, row counts, TLS-checked HTTP and authenticated
   figures. Procedure in `docs/boot-verification.md`.
