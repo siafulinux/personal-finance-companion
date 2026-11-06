@@ -13,8 +13,10 @@ android {
         applicationId = "com.pfc.companion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // 0.2.0: transaction create/edit, CSV import over SAF, secure token storage and
+        // the bundled project CA, none of which shipped in the 0.1.0 baseline.
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic

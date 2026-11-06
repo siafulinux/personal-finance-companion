@@ -48,6 +48,14 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 - `docs/acceptance-phase-2.0.md`, `docs/phase-2-plan.md`, and
   `backend/scripts/smoke_phase2.py` (35-check live end-to-end run).
 
+### Changed
+
+- **Android version `0.1.0` → `0.2.0`** (`versionCode` 2). The installed app had not been rebuilt
+  since before the bundled project CA (`res/raw/pfc_ca`) was wired into
+  `network_security_config.xml`, so the exported debug APK predated TLS trust and the
+  transaction/CSV-import/secure-storage work. Rebuilt and published as
+  `personal-finance-companion-0.2.0-debug.apk`, replacing the `0.1.0` download.
+
 ### Fixed
 
 - `formatDate()` no longer mixes `dateStyle`/`timeStyle` with day/month parts, which made
