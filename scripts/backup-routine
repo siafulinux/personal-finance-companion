@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
-# Weekly backup routine: dump, prove the dump by restoring it, then prune.
+# Weekly backup routine: dump, prove the dump by restoring it, copy it off the
+# machine, then prune.
 #
 # Steps, in this order and deliberately not reordered:
 #   1. take a dump (refuses to keep one with no table data)
 #   2. verify it by content against the live database (scratch restore)
-#   3. only if 1 and 2 succeeded, delete dumps beyond the retention count
+#   3. copy it to a second location and prove the copy by checksum
+#   4. only if 1-3 succeeded, delete dumps beyond the retention count
 #
 # A failed step leaves older backups untouched, so a bad night can never be the
 # night the good copies were pruned. A dump that fails verification is moved to
 # backups/rejected/ instead of being left looking like a usable backup.
 #
+# If no off-site destination is configured the routine still runs locally and
+# says so loudly, because the local-only mode loses everything with the disk.
+#
 # Scheduled by pfc-backup.timer (Sundays 03:00, persistent). Safe to run by hand:
 #   scripts/backup-routine
 #
 # Environment:
-#   PFC_BACKUP_KEEP   number of dumps to keep (default 8 = eight weeks)
-#   PFC_BACKUP_DIR    where dumps live (default <workspace>/backups)
+#   PFC_BACKUP_KEEP             number of dumps to keep locally (default 8)
+#   PFC_BACKUP_DIR              where dumps live (default <workspace>/backups)
+#   PFC_BACKUP_OFFSITE_DIR      copy each dump into this directory (a second
+#                               filesystem, e.g. a mounted external disk)
+#   PFC_BACKUP_OFFSITE_RSYNC    or copy it to `user@host:/path` over ssh
+#   PFC_BACKUP_OFFSITE_KEEP     dumps to keep off-site (default: PFC_BACKUP_KEEP)
+#   PFC_BACKUP_OFFSITE_ALLOW_SAME_DEVICE=1
+#                               allow an off-site directory on the same
+#                               filesystem. For drills and tests only: a copy on
+#                               the same disk is not off-site and does not
+#                               survive the failure it is meant to survive.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -32,6 +46,20 @@ REJECTED_DIR="$BACKUP_DIR/rejected"
 LOG_DIR="$ROOT/logs"
 mkdir -p "$BACKUP_DIR" "$LOG_DIR"
 
+OFFSITE_DIR="${PFC_BACKUP_OFFSITE_DIR:-}"
+OFFSITE_RSYNC="${PFC_BACKUP_OFFSITE_RSYNC:-}"
+OFFSITE_KEEP="${PFC_BACKUP_OFFSITE_KEEP:-$KEEP}"
+ALLOW_SAME_DEVICE="${PFC_BACKUP_OFFSITE_ALLOW_SAME_DEVICE:-0}"
+
+if ! [[ "$OFFSITE_KEEP" =~ ^[1-9][0-9]*$ ]]; then
+  echo "PFC_BACKUP_OFFSITE_KEEP must be a positive integer, got '$OFFSITE_KEEP'" >&2
+  exit 1
+fi
+if [[ -n "$OFFSITE_DIR" && -n "$OFFSITE_RSYNC" ]]; then
+  echo "set only one of PFC_BACKUP_OFFSITE_DIR and PFC_BACKUP_OFFSITE_RSYNC" >&2
+  exit 1
+fi
+
 # Everything this run says goes to the log file and to stdout (the journal).
 exec > >(tee -a "$LOG_DIR/backup.log") 2>&1
 
@@ -41,12 +69,14 @@ fail() { say "FAIL $*"; exit 1; }
 PFC="$ROOT/backend/.venv/bin/pfc"
 [[ -x "$PFC" ]] || fail "backend virtualenv missing ($PFC); run scripts/install-service or rebuild it"
 
+sha() { sha256sum -- "$1" | cut -d' ' -f1; }
+
 say "=== backup routine start (keep=$KEEP) ==="
 
 # 1. Dump. The CLI already refuses to keep a dump with no table data.
 STAMP="$(date +%Y%m%d-%H%M%S)"
 DUMP="$BACKUP_DIR/finance-$STAMP.dump"
-say "step 1/3 dump   -> $(basename "$DUMP")"
+say "step 1/4 dump   -> $(basename "$DUMP")"
 if ! "$PFC" backup -o "$DUMP" | sed 's/^/                 /'; then
   rm -f "$DUMP"
   fail "backup failed; nothing pruned"
@@ -54,19 +84,140 @@ fi
 [[ -f "$DUMP" ]] || fail "backup reported success but wrote no file; nothing pruned"
 
 # 2. Verify by content: restore into a scratch database and compare every table.
-say "step 2/3 verify -> restoring into a scratch database and comparing content"
+say "step 2/4 verify -> restoring into a scratch database and comparing content"
 if ! "$PFC" verify-backup "$DUMP" | sed 's/^/                 /'; then
   mkdir -p "$REJECTED_DIR"
   mv -f "$DUMP" "$REJECTED_DIR/$(basename "$DUMP").unverified"
   fail "verification failed; dump moved to backups/rejected/ and nothing pruned"
 fi
 
-# 3. Prune, newest first. Only real dumps are touched; rejected/ is never pruned.
+# 3. Off-site copy, proved by checksum. Two destinations are supported: a
+#    directory on another filesystem, or an rsync target over ssh. Either way the
+#    copy is written under a dot-prefixed name and renamed into place only after
+#    its checksum matches, so an interrupted copy can never look like a backup.
+NAME="$(basename "$DUMP")"
+WANT_SHA="$(sha "$DUMP")"
+
+offsite_dir_copy() {
+  local part="$OFFSITE_DIR/.$NAME.part"
+  local dest="$OFFSITE_DIR/$NAME"
+  local src_dev dst_dev
+
+  mkdir -p "$OFFSITE_DIR" || return 1
+
+  # A missing mount is the dangerous case: mkdir -p happily creates the target
+  # on the root filesystem, and the "off-site" copy ends up on the same disk as
+  # the original. Compare device ids and refuse rather than write a copy that
+  # protects against nothing.
+  src_dev="$(stat -c %d "$BACKUP_DIR")"
+  dst_dev="$(stat -c %d "$OFFSITE_DIR")"
+  if [[ "$src_dev" == "$dst_dev" ]]; then
+    if [[ "$ALLOW_SAME_DEVICE" == "1" ]]; then
+      say "                 WARNING off-site dir is on the same filesystem (allowed by environment)"
+    else
+      say "                 off-site dir $OFFSITE_DIR is on the same filesystem as backups/;"
+      say "                 is the backup disk mounted? refusing a copy that is not off-site"
+      return 1
+    fi
+  fi
+
+  # Clear a partial copy left by a previous interrupted run.
+  rm -f "$part"
+  cp -f -- "$DUMP" "$part" || { rm -f "$part"; return 1; }
+  sync -- "$part" 2>/dev/null || sync
+  if [[ "$(sha "$part")" != "$WANT_SHA" ]]; then
+    say "                 checksum mismatch after copy; discarding the partial copy"
+    rm -f "$part"
+    return 1
+  fi
+  mv -f -- "$part" "$dest" || { rm -f "$part"; return 1; }
+  say "                 copied to $dest (sha256 ${WANT_SHA:0:12}…, $(du -h "$dest" | cut -f1))"
+}
+
+offsite_rsync_copy() {
+  local host="${OFFSITE_RSYNC%%:*}"
+  local path="${OFFSITE_RSYNC#*:}"
+  local part="$path/.$NAME.part"
+  local dest="$path/$NAME"
+  local got
+
+  [[ "$host" != "$OFFSITE_RSYNC" && -n "$path" ]] || return 1
+  # BatchMode: never prompt for a passphrase or a host key from a timer.
+  ssh -o BatchMode=yes -- "$host" "mkdir -p -- '$path'" || return 1
+  if ! rsync -q -e "ssh -o BatchMode=yes" -- "$DUMP" "$host:$part"; then
+    ssh -o BatchMode=yes -- "$host" "rm -f -- '$part'" || true
+    return 1
+  fi
+  got="$(ssh -o BatchMode=yes -- "$host" "sha256sum -- '$part'" | cut -d' ' -f1)"
+  if [[ "$got" != "$WANT_SHA" ]]; then
+    say "                 checksum mismatch at $host; discarding the partial copy"
+    ssh -o BatchMode=yes -- "$host" "rm -f -- '$part'" || true
+    return 1
+  fi
+  ssh -o BatchMode=yes -- "$host" "mv -f -- '$part' '$dest'" || return 1
+  say "                 copied to $host:$dest (sha256 ${WANT_SHA:0:12}…)"
+}
+
+offsite_prune() {
+  local -a names=()
+  local n=0 name
+
+  if [[ -n "$OFFSITE_DIR" ]]; then
+    mapfile -t names < <(
+      find "$OFFSITE_DIR" -maxdepth 1 -type f -name 'finance-*.dump' -printf '%f\n' | sort -r
+    )
+    # A dot-prefixed partial older than a day is debris from a killed run.
+    find "$OFFSITE_DIR" -maxdepth 1 -type f -name '.finance-*.dump.part' -mtime +1 \
+      -print -delete | sed 's/^/                 removed stale partial /' || true
+  elif [[ -n "$OFFSITE_RSYNC" ]]; then
+    local host="${OFFSITE_RSYNC%%:*}"
+    local path="${OFFSITE_RSYNC#*:}"
+    mapfile -t names < <(
+      ssh -o BatchMode=yes -- "$host" "ls -1 -- '$path'/finance-*.dump 2>/dev/null" \
+        | sed 's#.*/##' | sort -r
+    )
+  else
+    return 0
+  fi
+
+  for name in "${names[@]}"; do
+    [[ -n "$name" ]] || continue
+    n=$((n + 1))
+    (( n <= OFFSITE_KEEP )) && continue
+    [[ "$name" == "$NAME" ]] && continue
+    if [[ -n "$OFFSITE_DIR" ]]; then
+      rm -f -- "$OFFSITE_DIR/$name"
+    else
+      local host="${OFFSITE_RSYNC%%:*}"
+      local path="${OFFSITE_RSYNC#*:}"
+      ssh -o BatchMode=yes -- "$host" "rm -f -- '$path/$name'" || true
+    fi
+    say "                 pruned off-site $name"
+  done
+  say "                 off-site holds $(( n > OFFSITE_KEEP ? OFFSITE_KEEP : n )) dump(s), keeping $OFFSITE_KEEP"
+}
+
+OFFSITE_MODE=none
+if [[ -n "$OFFSITE_DIR" ]]; then
+  OFFSITE_MODE="dir $OFFSITE_DIR"
+  say "step 3/4 offsite-> $OFFSITE_DIR"
+  offsite_dir_copy || fail "off-site copy failed; nothing pruned (local dumps intact)"
+elif [[ -n "$OFFSITE_RSYNC" ]]; then
+  OFFSITE_MODE="rsync $OFFSITE_RSYNC"
+  say "step 3/4 offsite-> $OFFSITE_RSYNC"
+  offsite_rsync_copy || fail "off-site copy failed; nothing pruned (local dumps intact)"
+else
+  say "step 3/4 offsite-> SKIPPED: no PFC_BACKUP_OFFSITE_DIR or PFC_BACKUP_OFFSITE_RSYNC configured"
+  say "                 WARNING every dump is on the same disk as the database; a disk"
+  say "                 failure loses production and every backup together."
+fi
+
+# 4. Prune, newest first. Only real dumps are touched; rejected/ is never pruned.
 mapfile -t dumps < <(
   find "$BACKUP_DIR" -maxdepth 1 -type f -name 'finance-*.dump' \
     -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2-
 )
-say "step 3/3 prune  -> ${#dumps[@]} dump(s) present, keeping $KEEP"
+say "step 4/4 prune  -> ${#dumps[@]} local dump(s) present, keeping $KEEP"
 kept=0
 for f in "${dumps[@]}"; do
   kept=$((kept + 1))
@@ -81,4 +232,10 @@ for f in "${dumps[@]}"; do
   fi
 done
 
-say "OK routine complete: $(basename "$DUMP") verified, $((kept > KEEP ? KEEP : kept)) kept"
+# Off-site retention runs last, after the current dump is safely in place.
+if [[ "$OFFSITE_MODE" != none ]]; then
+  say "         offsite retention (keep=$OFFSITE_KEEP)"
+  offsite_prune
+fi
+
+say "OK routine complete: $NAME verified, off-site=$OFFSITE_MODE, $((kept > KEEP ? KEEP : kept)) kept locally"

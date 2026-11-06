@@ -33,6 +33,13 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
   (`Persistent=true`, so a missed run catches up after boot). A failed dump or a failed
   verification aborts before pruning, and an unverified dump is moved to `backups/rejected/`.
   Retention defaults to eight dumps (`PFC_BACKUP_KEEP`). Documented in `docs/backups.md`.
+- **Off-site backup copies.** The weekly routine now copies each verified dump to a second
+  filesystem (`PFC_BACKUP_OFFSITE_DIR`) or an rsync-over-ssh target
+  (`PFC_BACKUP_OFFSITE_RSYNC`), checksums the copy at the destination and renames it into
+  place only after the checksum matches, so a partial copy can never look like a backup. It
+  refuses a destination on the same filesystem as `backups/` (the symptom of an unmounted
+  disk), and a failed copy aborts before any pruning. Off-site retention is separate
+  (`PFC_BACKUP_OFFSITE_KEEP`, default 12 weeks).
 - **`pfc verify-backup [dump]`. Restores a dump into a scratch database, hashes every row
   of every public table and compares the digests with production, so a backup that restores
   with the right row counts but wrong contents is rejected. The scratch database is always
@@ -63,6 +70,14 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
   be listed) is deleted and the command exits non-zero with an explanation. Previously an
   empty database produced a small, valid-looking dump that restored to nothing. A failed
   `pg_dump` also no longer leaves a partial file behind.
+
+### Fixed
+
+- **Backup test collateral (2026-11-06).** While testing the off-site guard, a retention run
+  was executed against the real `backups/` directory with `PFC_BACKUP_KEEP=1`, which pruned
+  five earlier dumps (2026-11-02, 2026-11-03 and three from 2026-11-05). No database data was
+  affected and the current database is covered by a verified dump on two filesystems, but
+  that recovery history is gone. Retention tests now run only in temporary directories.
 
 ### Security notes
 

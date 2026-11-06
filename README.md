@@ -134,7 +134,7 @@ Demo data is visibly marked in both apps and can be removed with `./scripts/app 
 ./scripts/app build-web     # production web build
 ./scripts/app backup        # compressed PostgreSQL dump in ./backups (refuses an empty dump)
 ./scripts/app verify-backup  # restore newest dump into a scratch DB and compare every table's content
-./scripts/backup-routine     # dump + verify + prune; what pfc-backup.timer runs weekly
+./scripts/backup-routine     # dump + verify + copy off-site + prune; what pfc-backup.timer runs weekly
 ./scripts/app restore FILE  # restore a dump (replaces current data)
 ./scripts/app doctor        # runtimes, migrations, configuration, ports
 ```
