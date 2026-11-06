@@ -9,15 +9,48 @@ endpoints, asks the assistant, then disconnects and deletes the imported data.
 
 from __future__ import annotations
 
+import atexit
 import sys
 import uuid
 
 import httpx
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8010") + "/api/v1"
+PASSWORD = "SmokeTestPass123"
 
 failures: list[str] = []
 checks = 0
+
+# Throwaway accounts are removed even when a check aborts the run, so repeated
+# smoke runs never leave active links for the scheduler to keep syncing.
+_created: list[httpx.Client] = []
+
+
+def _cleanup() -> None:
+    for client in _created:
+        try:
+            client.post(
+                "/account/delete",
+                json={"password": PASSWORD, "confirm": "DELETE"},
+                timeout=15,
+            )
+        except Exception:  # noqa: BLE001 - cleanup must never mask the result
+            pass
+
+
+atexit.register(_cleanup)
+
+
+def register(client: httpx.Client, email: str) -> None:
+    client.post(
+        "/auth/register",
+        json={"email": email, "password": PASSWORD, "display_name": "Smoke Test"},
+    )
+    token = client.post("/auth/login", json={"email": email, "password": PASSWORD}).json()[
+        "access_token"
+    ]
+    client.headers["Authorization"] = f"Bearer {token}"
+    _created.append(client)
 
 
 def check(label: str, condition: bool, detail: str = "") -> None:
@@ -38,15 +71,16 @@ def main() -> int:
     print("1. account + session")
     r = client.post(
         "/auth/register",
-        json={"email": email, "password": "SmokeTestPass123", "display_name": "Smoke Test"},
+        json={"email": email, "password": PASSWORD, "display_name": "Smoke Test"},
     )
     check("register", r.status_code in (200, 201), f"{r.status_code} {r.text[:200]}")
     # Bearer auth is the path the Android client uses and is independent of
     # Secure-cookie behaviour on plain HTTP, so the smoke drives it directly.
-    r = client.post("/auth/login", json={"email": email, "password": "SmokeTestPass123"})
+    r = client.post("/auth/login", json={"email": email, "password": PASSWORD})
     check("login", r.status_code == 200, f"{r.status_code} {r.text[:200]}")
     token = r.json()["access_token"]
     client.headers["Authorization"] = f"Bearer {token}"
+    _created.append(client)
     r = client.get("/auth/me")
     check("authenticated session", r.status_code == 200, r.text[:200])
 
@@ -151,19 +185,7 @@ def main() -> int:
 
     print("11. cross-user isolation")
     other = httpx.Client(base_url=BASE, timeout=30)
-    r = other.post(
-        "/auth/register",
-        json={
-            "email": f"smoke-other-{stamp}@example.com",
-            "password": "SmokeTestPass123",
-            "display_name": "Other User",
-        },
-    )
-    csrf = other.cookies.get("pfc_csrf")
-    if csrf:
-        other.headers["X-CSRF-Token"] = csrf
-    r = other.post("/auth/login", json={"email": f"smoke-other-{stamp}@example.com", "password": "SmokeTestPass123"})
-    other.headers["Authorization"] = f"Bearer {r.json()['access_token']}"
+    register(other, f"smoke-other-{stamp}@example.com")
     r = other.post(f"/connectivity/links/{link_id}/sync")
     check("foreign link not syncable", r.status_code == 404, str(r.status_code))
     r = other.delete(f"/connectivity/links/{link_id}")

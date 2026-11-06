@@ -71,6 +71,13 @@ timer; `pfc-run sync` and `scripts/install-service` were extended so the unit su
 workspace move like the Phase 1.3 units. The timer respects `SYNC_MIN_INTERVAL_MINUTES` so a
 frequent timer cannot hammer a provider.
 
+Installed and exercised on this machine: `pfc-sync.timer` is enabled (`OnBootSec=5min`, then
+every 30 min with up to 5 min of jitter, `Persistent=true`), and a manual
+`systemctl --user start pfc-sync.service` finished with `Result=success`, writing one line per
+due link to `logs/sync.log`. The backup timer and its off-site configuration were not touched;
+only the sync units and the `pfc-run` copy under `~/.local/lib/pfc/` were updated (the installed
+runner predated the `sync` subcommand, which is what `scripts/install-service` normally does).
+
 ### Database
 
 One additive migration, `1d9d6ad34893` (now head): `provider_links`, `provider_link_secrets`,
@@ -94,7 +101,9 @@ consent enforcement, ownership 404s), `test_intelligence.py` (suggestions, accep
 semantics, recurring detection, personalisation guards), `test_plaid_contract.py` (adapter
 against a fake Plaid endpoint: cursor loop, `removed`, pending linkage, error mapping).
 
-The smoke script drives the real service over HTTP: register → login → providers → link token →
+The smoke script drives the real service over HTTP and deletes the throwaway accounts it
+creates even if a check aborts (an earlier version left active links behind, which the new
+timer then kept syncing — that is why the cleanup is in the script now): register → login → providers → link token →
 exchange (consent enforced) → first sync imports rows → second sync imports **zero** and leaves
 the ledger total unchanged → pending rows visible → accept a suggestion and confirm the category
 is written → recurring detection → personal insights, forecast, shopping context/check →
