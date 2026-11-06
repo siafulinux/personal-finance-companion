@@ -59,6 +59,63 @@ backward compatibility, not a recommendation.
 `PFC_BACKUP_OFFSITE_ALLOW_SAME_DEVICE=1` overrides the filesystem check. It exists
 for drills and tests; a copy on the same disk protects against nothing.
 
+### A remote host instead of a disk
+
+For a copy that survives theft, fire or a dead machine, send the dump to another
+host. Set `PFC_BACKUP_OFFSITE_RSYNC` and use `PFC_BACKUP_OFFSITE_SSH_OPTS` for a
+non-standard port, a dedicated key or a jump host:
+
+```bash
+PFC_BACKUP_OFFSITE_RSYNC=backup@host:/srv/pfc-backups
+PFC_BACKUP_OFFSITE_SSH_OPTS="-p 2222 -i ~/.ssh/pfc_backup"
+```
+
+Requirements on the far side: `rsync`, `sha256sum`, and write access to the
+directory. Authentication must be non-interactive — the routine runs with
+`BatchMode=yes` and fails rather than prompting. Every network call is bounded by
+`PFC_BACKUP_OFFSITE_TIMEOUT` (default 600 s) so a host that accepts the TCP
+connection and then stalls cannot hang the unit until systemd's timeout.
+
+The same guarantees apply as for the directory mode: the copy lands under a
+`.finance-….dump.part` name, is checksummed on the far side, and is renamed only
+on a match. A failed or unverifiable copy aborts before any pruning.
+
+### Checking the destination without taking a backup
+
+```bash
+scripts/backup-routine --preflight
+```
+
+It reports reachability, whether `rsync` and `sha256sum` exist remotely, and
+whether the directory is writable — without dumping, verifying or pruning. Run it
+after any configuration change, and once after granting a new host access.
+
+### Known blocker: the `vpsnetwork` host
+
+`vpsnetwork` is **not** a working destination yet, and the routine is deliberately
+not pointed at it:
+
+- Its public address (`138.2.212.135`) does not answer on port 22 at all — ICMP
+  and TCP both time out, so this is a firewall, not a slow host.
+- Over Tailscale (`oracle-server`, `100.72.149.57`) the host is up, but it serves
+  **Tailscale SSH in `check` mode**: the connection waits for an interactive
+  browser approval (`https://login.tailscale.com/a/…`). A timer cannot satisfy
+  that, and the check has to be repeated, so even a one-off approval is not a fix.
+
+Either change the tailnet ACL for that host to `action: accept`, or run a normal
+`sshd` on a spare port with a dedicated key and point `PFC_BACKUP_OFFSITE_SSH_OPTS`
+at it. Then:
+
+```bash
+PFC_BACKUP_OFFSITE_RSYNC=ubuntu@100.72.149.57:/home/ubuntu/pfc-backups \
+PFC_BACKUP_OFFSITE_SSH_OPTS="-p 2222 -i ~/.ssh/pfc_backup" \
+  scripts/backup-routine --preflight
+```
+
+Until then the live destination stays `/mnt/storage/pfc-backups` (a separate
+physical disk), which protects against disk failure but not against losing the
+machine.
+
 Verify an off-site copy the same way as a local one — the check does not care
 where the file came from:
 
@@ -166,6 +223,12 @@ Not covered:
 | **Destination on the same filesystem** (`backups/offsite-test`) | `refusing a copy that is not off-site`, exit `1`, no partial file left, nothing pruned |
 | **Destination that cannot be created** (`/proc/…`) | `FAIL off-site copy failed; nothing pruned`, exit `1` |
 | **Off-site retention**, `PFC_BACKUP_OFFSITE_KEEP=2` with 4 seeded dumps in a temp directory | 3 oldest pruned, newest copied dump plus 1 older kept; a 2-day-old `.part` was removed, exit `0` |
+| **Rsync mode against a real sshd** (throwaway sshd on `127.0.0.1:2222`, dedicated key, `PFC_BACKUP_OFFSITE_SSH_OPTS="-p 2222 -i …"`) | copied, remote `sha256sum` matched, renamed into place, no `.part` left, exit `0`; local and remote files `cmp`-identical |
+| **Remote copy restores** — `pfc verify-backup /tmp/…/finance-….dump` | 19/19 tables content-identical, exit `0` |
+| **Remote retention**, `PFC_BACKUP_OFFSITE_KEEP=2` with 3 seeded dumps | 3 oldest deleted over ssh, newest kept; a 2-day-old remote `.part` swept, exit `0` |
+| **Remote unreachable** (wrong port, `KEEP=1`) | `FAIL off-site copy failed; nothing pruned`, exit `1`, local dump count unchanged |
+| **`--preflight`** on a working destination | reachability, `rsync`/`sha256sum`, writability all `OK`, exit `0` |
+| **`--preflight`** on `vpsnetwork` (public IP and Tailscale) | `cannot authenticate or connect`, exit `1`; the Tailscale attempt is cut off by `PFC_BACKUP_OFFSITE_TIMEOUT=15` instead of hanging |
 | `systemctl --user start pfc-backup.service` | `Result=success`, `ExecMainStatus=0`, journal shows the off-site copy and retention |
 | Retention with `PFC_BACKUP_KEEP=3` in a temporary directory holding 6 dumps | 3 oldest pruned, newest verified dump and the 2 next-newest kept, exit `0` |
 | Database stopped, `PFC_BACKUP_KEEP=1` | `FAIL backup failed; nothing pruned`, exit `1`, dump count unchanged — nothing was deleted despite retention being 1 |

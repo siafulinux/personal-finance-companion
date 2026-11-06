@@ -25,11 +25,17 @@
 #                               filesystem, e.g. a mounted external disk)
 #   PFC_BACKUP_OFFSITE_RSYNC    or copy it to `user@host:/path` over ssh
 #   PFC_BACKUP_OFFSITE_KEEP     dumps to keep off-site (default: PFC_BACKUP_KEEP)
+#   PFC_BACKUP_OFFSITE_SSH_OPTS extra ssh options for the rsync destination,
+#                               e.g. "-p 2222 -i ~/.ssh/pfc_backup"
 #   PFC_BACKUP_OFFSITE_ALLOW_SAME_DEVICE=1
 #                               allow an off-site directory on the same
 #                               filesystem. For drills and tests only: a copy on
 #                               the same disk is not off-site and does not
 #                               survive the failure it is meant to survive.
+#
+# `scripts/backup-routine --preflight` checks the configured destination
+# (reachability, write access, tools on the far side) without taking a dump or
+# touching retention. Use it after changing the configuration.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -50,6 +56,31 @@ OFFSITE_DIR="${PFC_BACKUP_OFFSITE_DIR:-}"
 OFFSITE_RSYNC="${PFC_BACKUP_OFFSITE_RSYNC:-}"
 OFFSITE_KEEP="${PFC_BACKUP_OFFSITE_KEEP:-$KEEP}"
 ALLOW_SAME_DEVICE="${PFC_BACKUP_OFFSITE_ALLOW_SAME_DEVICE:-0}"
+PREFLIGHT=0
+for arg in "$@"; do
+  case "$arg" in
+    --preflight) PREFLIGHT=1 ;;
+    -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown argument: $arg (only --preflight is accepted)" >&2; exit 2 ;;
+  esac
+done
+
+# Extra ssh options for the rsync destination: a non-standard port, a dedicated
+# identity, a jump host. Kept as an array so each option stays one word.
+# BatchMode: never prompt from a timer. ConnectTimeout: a host that silently
+# drops packets must fail in seconds, not sit until systemd's TimeoutStartSec.
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=20)
+if [[ -n "${PFC_BACKUP_OFFSITE_SSH_OPTS:-}" ]]; then
+  read -r -a _extra_ssh <<< "$PFC_BACKUP_OFFSITE_SSH_OPTS"
+  SSH_OPTS+=("${_extra_ssh[@]}")
+fi
+RSYNC_RSH="ssh ${SSH_OPTS[*]}"
+
+# Every network call is bounded. A host that accepts the TCP connection and then
+# waits for an interactive approval (Tailscale SSH "check" mode does exactly
+# this) would otherwise stall the unit until systemd kills it.
+OFFSITE_TIMEOUT="${PFC_BACKUP_OFFSITE_TIMEOUT:-600}"
+net() { timeout "$OFFSITE_TIMEOUT" "$@"; }
 
 if ! [[ "$OFFSITE_KEEP" =~ ^[1-9][0-9]*$ ]]; then
   echo "PFC_BACKUP_OFFSITE_KEEP must be a positive integer, got '$OFFSITE_KEEP'" >&2
@@ -72,6 +103,68 @@ PFC="$ROOT/backend/.venv/bin/pfc"
 sha() { sha256sum -- "$1" | cut -d' ' -f1; }
 
 say "=== backup routine start (keep=$KEEP) ==="
+
+# --preflight: prove the destination works without taking a dump or pruning
+# anything. Reachability is checked separately from write access so a failure
+# says which of the two is wrong.
+preflight() {
+  local bad=0
+  if [[ -z "$OFFSITE_DIR" && -z "$OFFSITE_RSYNC" ]]; then
+    say "preflight: no off-site destination configured (local-only mode)"
+    return 1
+  fi
+
+  if [[ -n "$OFFSITE_DIR" ]]; then
+    say "preflight: directory destination $OFFSITE_DIR"
+    mkdir -p "$OFFSITE_DIR" 2>/dev/null || { say "  cannot create the directory"; return 1; }
+    local src_dev dst_dev probe
+    src_dev="$(stat -c %d "$BACKUP_DIR")"
+    dst_dev="$(stat -c %d "$OFFSITE_DIR")"
+    if [[ "$src_dev" == "$dst_dev" && "$ALLOW_SAME_DEVICE" != "1" ]]; then
+      say "  same filesystem as $BACKUP_DIR — is the disk mounted?"
+      bad=1
+    else
+      say "  separate filesystem (device $dst_dev) — OK"
+    fi
+    probe="$OFFSITE_DIR/.pfc-preflight.$$"
+    if printf ok > "$probe" 2>/dev/null; then
+      rm -f "$probe"; say "  writable — OK"
+    else
+      say "  not writable"; bad=1
+    fi
+    return "$bad"
+  fi
+
+  local host="${OFFSITE_RSYNC%%:*}"
+  local path="${OFFSITE_RSYNC#*:}"
+  local probe=".pfc-preflight.$$"
+  say "preflight: rsync destination $host:$path"
+  if ! net ssh "${SSH_OPTS[@]}" -- "$host" true 2>/dev/null; then
+    say "  cannot authenticate or connect with: ssh ${SSH_OPTS[*]} $host"
+    return 1
+  fi
+  say "  ssh reachable — OK"
+  if ! net ssh "${SSH_OPTS[@]}" -- "$host" 'command -v rsync >/dev/null && command -v sha256sum >/dev/null' 2>/dev/null; then
+    say "  rsync and sha256sum are required on $host"; bad=1
+  else
+    say "  rsync + sha256sum present — OK"
+  fi
+  if net ssh "${SSH_OPTS[@]}" -- "$host" "mkdir -p -- '$path' && printf ok > '$path/$probe' && rm -f -- '$path/$probe'" 2>/dev/null; then
+    say "  $path writable — OK"
+  else
+    say "  cannot write to $path on $host"; bad=1
+  fi
+  return "$bad"
+}
+
+if (( PREFLIGHT )); then
+  if preflight; then
+    say "preflight OK"
+    exit 0
+  fi
+  say "preflight FAILED"
+  exit 1
+fi
 
 # 1. Dump. The CLI already refuses to keep a dump with no table data.
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -143,18 +236,18 @@ offsite_rsync_copy() {
 
   [[ "$host" != "$OFFSITE_RSYNC" && -n "$path" ]] || return 1
   # BatchMode: never prompt for a passphrase or a host key from a timer.
-  ssh -o BatchMode=yes -- "$host" "mkdir -p -- '$path'" || return 1
-  if ! rsync -q -e "ssh -o BatchMode=yes" -- "$DUMP" "$host:$part"; then
-    ssh -o BatchMode=yes -- "$host" "rm -f -- '$part'" || true
+  net ssh "${SSH_OPTS[@]}" -- "$host" "mkdir -p -- '$path'" || return 1
+  if ! net rsync -q -e "$RSYNC_RSH" -- "$DUMP" "$host:$part"; then
+    net ssh "${SSH_OPTS[@]}" -- "$host" "rm -f -- '$part'" || true
     return 1
   fi
-  got="$(ssh -o BatchMode=yes -- "$host" "sha256sum -- '$part'" | cut -d' ' -f1)"
+  got="$(net ssh "${SSH_OPTS[@]}" -- "$host" "sha256sum -- '$part'" | cut -d' ' -f1)"
   if [[ "$got" != "$WANT_SHA" ]]; then
     say "                 checksum mismatch at $host; discarding the partial copy"
-    ssh -o BatchMode=yes -- "$host" "rm -f -- '$part'" || true
+    net ssh "${SSH_OPTS[@]}" -- "$host" "rm -f -- '$part'" || true
     return 1
   fi
-  ssh -o BatchMode=yes -- "$host" "mv -f -- '$part' '$dest'" || return 1
+  net ssh "${SSH_OPTS[@]}" -- "$host" "mv -f -- '$part' '$dest'" || return 1
   say "                 copied to $host:$dest (sha256 ${WANT_SHA:0:12}…)"
 }
 
@@ -172,8 +265,12 @@ offsite_prune() {
   elif [[ -n "$OFFSITE_RSYNC" ]]; then
     local host="${OFFSITE_RSYNC%%:*}"
     local path="${OFFSITE_RSYNC#*:}"
+    # Clear a partial left by a killed rsync, same rule as the directory mode.
+    net ssh "${SSH_OPTS[@]}" -- "$host" \
+      "find '$path' -maxdepth 1 -type f -name '.finance-*.dump.part' -mtime +1 -delete 2>/dev/null; true" \
+      | sed 's/^/                 removed stale partial /' || true
     mapfile -t names < <(
-      ssh -o BatchMode=yes -- "$host" "ls -1 -- '$path'/finance-*.dump 2>/dev/null" \
+      net ssh "${SSH_OPTS[@]}" -- "$host" "ls -1 -- '$path'/finance-*.dump 2>/dev/null" \
         | sed 's#.*/##' | sort -r
     )
   else
@@ -190,7 +287,7 @@ offsite_prune() {
     else
       local host="${OFFSITE_RSYNC%%:*}"
       local path="${OFFSITE_RSYNC#*:}"
-      ssh -o BatchMode=yes -- "$host" "rm -f -- '$path/$name'" || true
+      net ssh "${SSH_OPTS[@]}" -- "$host" "rm -f -- '$path/$name'" || true
     fi
     say "                 pruned off-site $name"
   done

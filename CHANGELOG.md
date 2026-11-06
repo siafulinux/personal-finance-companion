@@ -33,6 +33,14 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
   (`Persistent=true`, so a missed run catches up after boot). A failed dump or a failed
   verification aborts before pruning, and an unverified dump is moved to `backups/rejected/`.
   Retention defaults to eight dumps (`PFC_BACKUP_KEEP`). Documented in `docs/backups.md`.
+- **Remote off-site destination.** `PFC_BACKUP_OFFSITE_RSYNC=user@host:/path` copies dumps
+  over ssh instead of to a local disk, with `PFC_BACKUP_OFFSITE_SSH_OPTS` for a non-standard
+  port, dedicated key or jump host. Every network call is bounded by
+  `PFC_BACKUP_OFFSITE_TIMEOUT` (600 s default), so a host that accepts the connection and then
+  stalls cannot hang the unit. `scripts/backup-routine --preflight` checks reachability,
+  `rsync`/`sha256sum` and write access without taking a dump. Verified against a throwaway
+  sshd: copy, remote checksum, atomic rename, remote retention and the unreachable-host abort.
+  `vpsnetwork` remains an unusable destination — see the blocker in `docs/backups.md`.
 - **Off-site backup copies.** The weekly routine now copies each verified dump to a second
   filesystem (`PFC_BACKUP_OFFSITE_DIR`) or an rsync-over-ssh target
   (`PFC_BACKUP_OFFSITE_RSYNC`), checksums the copy at the destination and renames it into

@@ -18,6 +18,9 @@ die() { printf 'pfc-run: %s\n' "$*" >&2; exit 78; }
 POINTER="${PFC_WORKSPACE_POINTER:-${XDG_CONFIG_HOME:-$HOME/.config}/pfc/workspace}"
 
 ROLE="${1:-}"
+# Anything after the role is forwarded to the program, so a unit or a person can
+# run e.g. `pfc-run backup --preflight`.
+shift || true
 case "$ROLE" in
   api|web|tls|backup|wait-db|migrate|where) ;;
   *) die "usage: pfc-run <api|web|tls|backup|wait-db|migrate|where>" ;;
@@ -101,7 +104,7 @@ case "$ROLE" in
     # The routine logs itself to logs/backup.log; adding log_to here would
     # duplicate every line.
     require scripts/backup-routine
-    exec "$ROOT/scripts/backup-routine"
+    exec "$ROOT/scripts/backup-routine" "$@"
     ;;
 
   tls)
