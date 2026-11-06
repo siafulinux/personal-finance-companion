@@ -5,6 +5,11 @@ connectivity layer is proven with the **bundled sandbox institution only**. No l
 real Plaid item, and no external AI provider has been exercised. Read the limitations before
 quoting any of this as production capability.
 
+A **live Plaid verification harness** now exists (`backend/scripts/verify_plaid_live.py`). It
+drives the real service layer against `sandbox.plaid.com` and fails closed: exit 2 with no
+keys, exit 3 against any non-sandbox environment. **It has not been run**, because this
+deployment holds no Plaid credentials — see section 7.1. Nothing below claims otherwise.
+
 Baseline this work started from: `8f150aa` (Phase 1.3 checkpoint), database at Alembic
 `fced71fed827`. The Phase 2 assessment and provider comparison live in
 [phase-2-plan.md](phase-2-plan.md).
@@ -19,7 +24,7 @@ Baseline this work started from: `8f150aa` (Phase 1.3 checkpoint), database at A
 |---|---|---|
 | Adapter contract | `providers/base.py` | `create_link_token`, `complete_link`, `fetch_accounts`, `fetch_transactions`, `revoke`, plus a typed `ProviderError`. Replaces the Phase 1 `financial.py` stub, which had no linking, cursor or token handling. |
 | Sandbox institution | `providers/sandbox.py` | Deterministic, offline, seeded from the link token. Generates 3 accounts and ~65 transactions over 90 days including payroll, rent, groceries, two subscriptions, a transfer and **one pending card purchase** that posts on a later sync. No credentials, no network. |
-| Plaid adapter | `providers/plaid.py` | Link token, `/item/public_token/exchange`, accounts, `/transactions/sync` cursor loop with `added`/`modified`/`removed`, pending→posted linkage, `revoke`. Disabled unless `PLAID_CLIENT_ID` + `PLAID_SECRET` are set. |
+| Plaid adapter | `providers/plaid.py` | Link token, `/item/public_token/exchange`, accounts, `/transactions/sync` cursor loop with `added`/`modified`/`removed`, pending→posted linkage, `revoke`, plus `/sandbox/public_token/create` so a headless run can reach a real sandbox Item without the Link UI. Disabled unless `PLAID_CLIENT_ID` + `PLAID_SECRET` are set; the sandbox bootstrap additionally refuses any non-sandbox environment. |
 | Registry | `providers/registry.py` | `available_providers()` reports `configured` / `simulated` / `requires_credentials` and never returns a secret. |
 | Sync engine | `services/sync.py` | Cursor-based incremental sync, per-run counters, duplicate suppression through the existing dedupe key, pending→posted reconciliation, removal handling, retry/backoff state, sync history, disconnect with optional data deletion. |
 | Token protection | `security/secrets.py` | Provider access tokens encrypted at rest (Fernet, key derived from `SECRET_KEY`), deleted on disconnect. |
@@ -99,7 +104,13 @@ New backend tests: `test_connectivity.py` (engine: linking, idempotent re-sync, 
 removal, disconnect/deletion, per-user isolation), `test_connectivity_api.py` (HTTP surface,
 consent enforcement, ownership 404s), `test_intelligence.py` (suggestions, accept/reject
 semantics, recurring detection, personalisation guards), `test_plaid_contract.py` (adapter
-against a fake Plaid endpoint: cursor loop, `removed`, pending linkage, error mapping).
+against a fake Plaid endpoint: cursor loop, `removed`, pending linkage, error mapping, and the
+sandbox bootstrap request shape, its non-sandbox refusal and its missing-token case).
+
+Backend suite after the Plaid harness work: **143 passed** (`cd backend && .venv/bin/python -m
+pytest -q`, 103 s). A single earlier rerun stalled near the end of the run; the same command
+then completed cleanly twice, and no test touches the network, so this is recorded as an
+unexplained one-off rather than a known failure.
 
 The smoke script drives the real service over HTTP and deletes the throwaway accounts it
 creates even if a check aborts (an earlier version left active links behind, which the new
@@ -172,7 +183,10 @@ scoped. No physical device testing was performed.
 
 1. **No live institution.** Only the sandbox provider has run end to end. The Plaid adapter is
    written against Plaid's documented contract and tested against a fake endpoint; it has never
-   exchanged a real token or synced a real item. Do not describe this as bank connectivity.
+   exchanged a real token or synced a real item. A harness that would prove exactly that now
+   exists (section 7.1) but is unrun: **no Plaid credential exists in this deployment**, and
+   Plaid issues sandbox keys only through its dashboard. Do not describe this as bank
+   connectivity.
 2. **Plaid production requirements** (approval, pricing, redirect URIs, webhook verification) are
    unaddressed; the webhook URL is a setting nothing validates yet.
 3. **No webhook receiver.** Scheduled polling (`pfc-sync.timer`) is the only automatic path.
@@ -208,3 +222,34 @@ cd backend && .venv/bin/python scripts/smoke_phase2.py
 # scheduled sync, once
 cd backend && ./.venv/bin/pfc sync-links
 ```
+
+### 7.1 Live Plaid verification (implemented, not yet run)
+
+```bash
+cd backend && .venv/bin/python scripts/verify_plaid_live.py
+# exit 0 verified · 2 not configured · 3 wrong environment · 4 a step failed
+```
+
+Requires `PLAID_CLIENT_ID` and `PLAID_SECRET` in `.env` (Dashboard → Team settings → API keys).
+The run is self-contained: it creates an ephemeral user, creates a **real sandbox Item** at
+First Platypus Bank (`ins_109508`) through `/sandbox/public_token/create`, and then asserts, one
+step at a time:
+
+1. the registry reports `plaid` as configured and not simulated (wiring, not a hand-built adapter);
+2. `/link/token/create` returns a `link-sandbox-…` token — prefix recorded, never the value;
+3. `connect_institution` imports accounts and transactions through the normal service layer;
+4. the cursor is persisted and the access token is stored only as ciphertext (the plaintext is
+   asserted absent from the stored column);
+5. a second sync adds **zero** rows and leaves the ledger count unchanged (duplicate suppression);
+6. every local balance matches the balance the institution reports for that account;
+7. `disconnect_link(delete_data=True)` reports `revoked_at_provider=true`, removes the imported
+   rows and destroys the stored credential;
+8. re-using the revoked access token is rejected **by Plaid** (`INVALID_ACCESS_TOKEN`), which is
+   the only real proof the revoke reached the provider;
+9. the ephemeral user and all its financial data are deleted.
+
+Evidence (counts, statuses, Plaid error codes — never a token) is written to
+`logs/plaid-live/<timestamp>.json`. A failed run still revokes the Item and deletes the user.
+
+**Current state: not executed.** Without keys the script exits 2 before opening a session or
+making any call, so no partial data and no live request exist.

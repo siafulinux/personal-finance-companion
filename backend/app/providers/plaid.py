@@ -8,9 +8,11 @@ Plaid leaks into the sync engine.
 ``/transactions/sync`` is the reason Plaid was chosen: it returns ``added`` / ``modified``
 / ``removed`` with an opaque cursor, which maps directly onto the sync contract.
 
-**Status: not exercised against Plaid's servers.** This deployment holds no Plaid
-credentials. The adapter is covered by contract tests against a local fake endpoint that
-implements Plaid's documented request/response shapes.
+**Status: contract-tested, live verification pending credentials.** The adapter is covered
+by contract tests against a local fake endpoint that implements Plaid's documented
+request/response shapes. ``scripts/verify_plaid_live.py`` drives this adapter against
+``sandbox.plaid.com`` for real (link → sync → resync → revoke) and needs
+``PLAID_CLIENT_ID`` / ``PLAID_SECRET`` from https://dashboard.plaid.com/team/keys.
 """
 
 from __future__ import annotations
@@ -30,6 +32,10 @@ from app.providers.base import (
     TransactionDelta,
 )
 from app.utils.money import quantize
+
+# First Platypus Bank: a non-OAuth Sandbox institution with pre-populated transaction
+# history, so `/sandbox/public_token/create` reaches an Item with real data immediately.
+SANDBOX_INSTITUTION_ID = "ins_109508"
 
 _ENVIRONMENTS = {
     "sandbox": "https://sandbox.plaid.com",
@@ -231,6 +237,40 @@ class PlaidProvider(ProviderAdapter):
             "mode": "hosted",
             "environment": self.environment,
         }
+
+    def create_sandbox_public_token(
+        self,
+        institution_id: str = SANDBOX_INSTITUTION_ID,
+        *,
+        days_requested: int = 90,
+    ) -> str:
+        """Create a Sandbox Item without going through the Link UI.
+
+        This is Plaid's documented way to bypass Link, and it is how a headless run can
+        reach a real Item on ``sandbox.plaid.com``. The endpoint does not exist outside
+        Sandbox, so a non-sandbox configuration is refused locally rather than sending a
+        request that Plaid would reject.
+        """
+        if self.environment != "sandbox":
+            raise ProviderError(
+                "Sandbox Items can only be created in Plaid's sandbox environment.",
+                code="not_sandbox",
+                retryable=False,
+            )
+        data = self._post(
+            "/sandbox/public_token/create",
+            {
+                "institution_id": institution_id,
+                "initial_products": ["transactions"],
+                "options": {"transactions": {"days_requested": days_requested}},
+            },
+        )
+        public_token = data.get("public_token")
+        if not public_token:
+            raise ProviderError(
+                "The provider did not return a public token.", code="bad_payload"
+            )
+        return str(public_token)
 
     def complete_link(self, public_token: str) -> LinkResult:
         data = self._post("/item/public_token/exchange", {"public_token": public_token})

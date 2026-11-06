@@ -1,8 +1,9 @@
 """Plaid adapter contract tests against a local fake endpoint.
 
 These tests prove the adapter speaks Plaid's documented shapes and maps them correctly.
-They do **not** prove connectivity to Plaid's servers: this deployment has no Plaid
-credentials, and nothing here touches the network.
+They do **not** prove connectivity to Plaid's servers: nothing here touches the network.
+Live verification is a separate, credential-gated run of
+``scripts/verify_plaid_live.py`` against ``sandbox.plaid.com``.
 """
 
 from __future__ import annotations
@@ -278,6 +279,52 @@ def test_rate_limit_is_retryable():
     assert exc.value.code == "rate_limited"
     assert exc.value.retryable is True
     assert exc.value.requires_reauth is False
+
+
+def test_sandbox_public_token_request_shape():
+    """The sandbox bootstrap is the only headless way to a real Plaid Item."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        seen.update(json.loads(request.content))
+        seen["path"] = request.url.path
+        return httpx.Response(
+            200, json={"public_token": "public-sandbox-abc", "expiration": "2026-11-06"}
+        )
+
+    token = _provider(handler, environment="sandbox").create_sandbox_public_token(
+        "ins_109508"
+    )
+    assert token == "public-sandbox-abc"
+    assert seen["path"] == "/sandbox/public_token/create"
+    assert seen["client_id"] == "test-client"
+    assert seen["institution_id"] == "ins_109508"
+    assert seen["initial_products"] == ["transactions"]
+    assert seen["options"]["transactions"]["days_requested"] == 90
+
+
+def test_sandbox_public_token_refused_outside_sandbox():
+    provider = PlaidProvider(
+        client_id="c",
+        secret="s",
+        environment="production",
+        base_url="https://plaid.test",
+    )
+    with pytest.raises(ProviderError) as exc:
+        provider.create_sandbox_public_token("ins_109508")
+    assert exc.value.code == "not_sandbox"
+    assert exc.value.retryable is False
+
+
+def test_sandbox_public_token_without_a_token_is_a_bad_payload():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"expiration": "2026-11-06"})
+
+    with pytest.raises(ProviderError) as exc:
+        _provider(handler, environment="sandbox").create_sandbox_public_token("ins_109508")
+    assert exc.value.code == "bad_payload"
 
 
 def test_network_failure_is_retryable_and_leaks_nothing():

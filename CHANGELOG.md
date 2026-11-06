@@ -16,7 +16,12 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
   replacing the Phase 1 stub, a deterministic **sandbox institution** that needs no
   credentials or network, and a **Plaid** adapter (`/link/token/create`, item exchange,
   cursor-based `/transactions/sync`, pending→posted linkage, `revoke`) that stays disabled
-  until `PLAID_CLIENT_ID` and `PLAID_SECRET` are set.
+  until `PLAID_CLIENT_ID` and `PLAID_SECRET` are set. The adapter also implements
+  `/sandbox/public_token/create`, so a headless run can reach a real sandbox Item, and
+  `scripts/verify_plaid_live.py` proves link → sync → resync (no duplicates) → balance
+  agreement → revoke against `sandbox.plaid.com`. It is not yet run: this deployment holds no
+  Plaid credential, and the script exits 2 without one rather than falling back to the
+  simulated institution.
 - **Sync engine.** Cursor-based incremental sync with per-run counters, duplicate
   suppression through the existing dedupe key, pending→posted reconciliation, removal
   handling, retry/backoff state, sync history, and disconnect with optional deletion of the
