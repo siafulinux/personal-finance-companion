@@ -96,9 +96,49 @@ All responses are `Cache-Control: no-store` and carry `X-Content-Type-Options`, 
 | GET | `/forecast?days=` | Projected balance and lowest point, bill-driven |
 | GET | `/shopping/context` | Categories and current context for Shopping Check |
 | POST | `/shopping/check` | `{store_name, category_id, expected_amount?}` → verdict, limits, bills covered |
-| GET | `/ai/status` | Provider status (`disabled` in Phase 1) |
+| GET | `/ai/status` | Provider status (`disabled` unless a model provider is configured) |
 | GET | `/ai/tools` | Tool registry |
 | GET | `/ai/tools/{name}` | Run a read-only tool payload |
+
+### Connectivity (Phase 2)
+
+Provider-independent institution linking and synchronisation. `consent: true` is required to
+import anything; tokens are encrypted at rest and never returned.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/connectivity/providers` | Providers with `configured` / `simulated` flags (no secrets) |
+| POST | `/connectivity/link-token` | `{provider}` → link token for the provider's own approval flow |
+| POST | `/connectivity/exchange` | `{provider, public_token, consent}` → link, imported accounts, first sync run |
+| GET | `/connectivity/links` | Links with status, last sync and cursor state |
+| POST | `/connectivity/links/{id}/sync` | Manual sync (`?full_refresh=true` to ignore the cursor) |
+| DELETE | `/connectivity/links/{id}?delete_data=` | Disconnect; optionally delete the accounts and transactions it created |
+| GET | `/connectivity/sync-runs` | Sync history: added / modified / removed / skipped duplicates / errors |
+
+### Intelligence (Phase 2)
+
+Automated proposals the user reviews. Accepting writes the value and records it as a
+user-confirmed choice so later automation never overwrites it.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/suggestions?status=` | Category suggestions with confidence, source and reason |
+| POST | `/suggestions/{id}/accept` | Apply the suggested category |
+| POST | `/suggestions/{id}/reject` | Dismiss; the same transaction won't be suggested again for that rule |
+| GET | `/recurring` | Detected series, subscriptions and `subscription_monthly_total` |
+| POST | `/recurring/detect` | Re-run detection over the last 180 days |
+| POST | `/recurring/{id}/confirm` \| `/dismiss` | Keep or suppress a series |
+| GET | `/insights/personal` | Explainable observations, each with its own evidence block |
+| GET | `/insights/merchant?merchant=` | Merchant profile: typical amount, monthly average, tendency |
+| PATCH | `/insights/preferences` | Insight sensitivity, personalisation and AI consent toggles |
+
+### Assistant (Phase 2)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/assistant/status` | Whether a model provider is configured and whether the user opted in |
+| POST | `/assistant/ask` | `{question}` → answer, `tools_used`, `source` (`deterministic` or `model`) |
+| POST | `/assistant/consent` | `{consent}` — required before anything is sent to a model provider |
 
 ### Meta
 

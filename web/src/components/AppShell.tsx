@@ -3,11 +3,15 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import {
   AccountsIcon,
+  AssistantIcon,
   BillsIcon,
   BudgetsIcon,
   CalendarIcon,
+  ConnectionsIcon,
   DashboardIcon,
+  InsightsIcon,
   MoonIcon,
+  ReviewIcon,
   SettingsIcon,
   ShoppingIcon,
   SunIcon,
@@ -23,6 +27,10 @@ const NAV = [
   { to: "/bills", label: "Bills", icon: <BillsIcon /> },
   { to: "/calendar", label: "Calendar", icon: <CalendarIcon /> },
   { to: "/shopping", label: "Shopping", icon: <ShoppingIcon /> },
+  { to: "/connections", label: "Connections", icon: <ConnectionsIcon /> },
+  { to: "/review", label: "Review", icon: <ReviewIcon /> },
+  { to: "/insights", label: "Insights", icon: <InsightsIcon /> },
+  { to: "/assistant", label: "Assistant", icon: <AssistantIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 

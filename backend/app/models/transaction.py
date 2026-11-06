@@ -23,7 +23,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.base import MONEY, TimestampMixin, UUIDPrimaryKey, str_enum
-from app.models.enums import TransactionSource, TransactionStatus, TransactionType
+from app.models.enums import (
+    CategorySource,
+    TransactionSource,
+    TransactionStatus,
+    TransactionType,
+)
 
 
 class Transaction(Base, UUIDPrimaryKey, TimestampMixin):
@@ -54,6 +59,12 @@ class Transaction(Base, UUIDPrimaryKey, TimestampMixin):
     posting_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     category_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
+    )
+    # Who chose the category. ``user`` is never overwritten by automation.
+    category_source: Mapped[str] = mapped_column(
+        str_enum(CategorySource, "category_source_enum"),
+        nullable=False,
+        server_default=CategorySource.NONE.value,
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(

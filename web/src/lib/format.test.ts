@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   daysBetween,
+  formatDate,
   formatMoney,
   formatPercent,
   formatSignedMoney,
@@ -45,5 +46,21 @@ describe("date helpers", () => {
 
   it("parses month inputs", () => {
     expect(parseMonth("2026-02")).toEqual({ year: 2026, month: 2 });
+  });
+
+  it("formats plain dates with a year by default", () => {
+    expect(formatDate("2026-11-06")).toBe("Nov 6, 2026");
+    expect(formatDate(null)).toBe("—");
+  });
+
+  it("formats timestamps with style presets without throwing", () => {
+    // dateStyle/timeStyle cannot be mixed with day/month parts; a regression here
+    // blanked the whole Connections page on the sync history.
+    const rendered = formatDate("2026-11-06T14:32:00+00:00", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    expect(rendered).toContain("2026");
+    expect(rendered).toMatch(/\d/);
   });
 });

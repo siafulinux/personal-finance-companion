@@ -34,6 +34,13 @@ export function todayISO(): string {
 
 export function formatDate(value: string | null | undefined, opts?: Intl.DateTimeFormatOptions): string {
   if (!value) return "—";
+  // `dateStyle`/`timeStyle` are whole-format presets and cannot be combined with
+  // day/month/year parts: passing both makes Intl throw "Invalid option".
+  if (opts?.dateStyle || opts?.timeStyle) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return new Intl.DateTimeFormat("en-US", opts).format(parsed);
+  }
   const [year, month, day] = value.slice(0, 10).split("-").map(Number);
   if (!year || !month || !day) return value;
   const date = new Date(year, month - 1, day);

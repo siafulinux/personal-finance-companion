@@ -22,8 +22,8 @@ ROLE="${1:-}"
 # run e.g. `pfc-run backup --preflight`.
 shift || true
 case "$ROLE" in
-  api|web|tls|backup|wait-db|migrate|where) ;;
-  *) die "usage: pfc-run <api|web|tls|backup|wait-db|migrate|where>" ;;
+  api|web|tls|backup|sync|wait-db|migrate|where) ;;
+  *) die "usage: pfc-run <api|web|tls|backup|sync|wait-db|migrate|where>" ;;
 esac
 
 # Resolve the workspace through the pointer, following symlinks to the real
@@ -105,6 +105,15 @@ case "$ROLE" in
     # duplicate every line.
     require scripts/backup-routine
     exec "$ROOT/scripts/backup-routine" "$@"
+    ;;
+
+  sync)
+    # Scheduled institution sync. One link's failure never stops the others; the
+    # command exits non-zero only when every attempted link failed.
+    require backend/.venv/bin/pfc
+    log_to sync
+    cd "$ROOT/backend"
+    exec ./.venv/bin/pfc sync-links "$@"
     ;;
 
   tls)

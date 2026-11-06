@@ -12,9 +12,10 @@ from app.calculations.safe_to_spend import evaluate_purchase
 from app.models import IncomeSource, NotificationPreference, User
 from app.models.enums import AccountType
 from app.services.bills import horizon_candidates, next_payday_date, occurrence_dict
+from app.services.personal import merchant_advice
 from app.services.safe_to_spend import category_availability, compute
 from app.utils.dates import today_in
-from app.utils.money import ZERO, quantize
+from app.utils.money import ZERO, format_money, quantize
 
 
 def shopping_check(
@@ -41,7 +42,7 @@ def shopping_check(
     bills_sentence = (
         "Your upcoming bills are covered under the current plan."
         if bills_covered
-        else f"You are projected short by {safe.projected_shortfall} before your next payday."
+        else f"You are projected short by {format_money(safe.projected_shortfall)} before your next payday."
     )
 
     purchase = None
@@ -58,9 +59,26 @@ def shopping_check(
         )
     else:
         message = (
-            f"You have {safe.safe_to_spend} available overall and "
-            f"{availability.remaining} remaining in {availability.category_name}. {bills_sentence}"
+            f"You have {format_money(safe.safe_to_spend)} available overall and "
+            f"{format_money(availability.remaining)} remaining in {availability.category_name}. {bills_sentence}"
         )
+
+    # Merchant history, with a minimum-history guard inside the service: an unknown
+    # merchant produces an explicit "not enough history" rather than a guess.
+    advice = merchant_advice(
+        db,
+        user,
+        merchant=store_name,
+        category_id=category_id,
+        category_remaining=availability.remaining,
+    )
+    if advice.get("has_enough_history"):
+        message = f"{message} {advice['message']}"
+        if advice.get("suggested_limit") is not None:
+            message = (
+                f"{message} A limit of {format_money(advice['suggested_limit'])} this visit keeps you "
+                "inside both your usual spend and the remaining budget."
+            )
 
     warnings = list(safe.warnings)
     if availability.upcoming_commitments > availability.remaining:
@@ -69,6 +87,10 @@ def shopping_check(
         )
     if expected_amount is not None and purchase and not purchase["allowed"]:
         warnings.append("This purchase is not recommended under your current plan.")
+    if advice.get("has_enough_history") and advice.get("tendency") == "overspending":
+        warnings.append(
+            f"You are ahead of your usual monthly spending at {advice['merchant']}."
+        )
 
     return {
         "store_name": store_name.strip(),
@@ -76,6 +98,7 @@ def shopping_check(
         "safe_to_spend": safe.as_dict(),
         "expected_amount": str(quantize(expected_amount)) if expected_amount is not None else None,
         "purchase": purchase,
+        "merchant_advice": advice,
         "message": message,
         "upcoming_bills": upcoming,
         "next_payday": payday.isoformat() if payday else None,

@@ -17,6 +17,15 @@ import type {
   Profile,
   SafeToSpend,
   ShoppingResult,
+  AssistantAnswer,
+  AssistantStatus,
+  CategorySuggestionItem,
+  LinkedAccountRef,
+  PersonalInsights,
+  ProviderInfo,
+  ProviderLink,
+  RecurringItem,
+  SyncRunSummary,
   Transaction,
   TransactionPage,
   UploadResponse,
@@ -292,6 +301,94 @@ export const api = {
     shopping: (body: { store_name: string; category_id: string; expected_amount?: string | null; note?: string }) =>
       request<ShoppingResult>("/shopping/check", { method: "POST", body: json(body) }),
     aiStatus: () => request<{ enabled: boolean; provider: string; phase: string }>("/ai/status"),
+  },
+
+  connectivity: {
+    providers: () => request<{ providers: ProviderInfo[] }>("/connectivity/providers"),
+    linkToken: (provider: string) =>
+      request<{ provider: string; link_token: string; mode: string; note?: string }>(
+        "/connectivity/link-token",
+        { method: "POST", body: json({ provider }) }
+      ),
+    exchange: (body: { provider: string; public_token: string; consent: boolean }) =>
+      request<{
+        link: ProviderLink;
+        accounts: LinkedAccountRef[];
+        sync: SyncRunSummary;
+      }>("/connectivity/exchange", { method: "POST", body: json(body) }),
+    links: () => request<{ links: ProviderLink[] }>("/connectivity/links"),
+    sync: (linkId: string, fullRefresh = false) =>
+      request<{ sync: SyncRunSummary; link: ProviderLink; error?: string }>(
+        `/connectivity/links/${linkId}/sync`,
+        { method: "POST", query: { full_refresh: fullRefresh } }
+      ),
+    unlink: (linkId: string, deleteData: boolean) =>
+      request<{
+        revoked_at_provider: boolean;
+        deleted_transactions: number;
+        deleted_accounts: number;
+        kept_accounts: number;
+      }>(`/connectivity/links/${linkId}`, { method: "DELETE", query: { delete_data: deleteData } }),
+    syncRuns: (limit = 20) =>
+      request<{ runs: SyncRunSummary[] }>("/connectivity/sync-runs", { query: { limit } }),
+  },
+
+  review: {
+    suggestions: (status = "suggested") =>
+      request<{ items: CategorySuggestionItem[]; count: number }>("/suggestions", {
+        query: { status },
+      }),
+    accept: (id: string) =>
+      request<CategorySuggestionItem>(`/suggestions/${id}/accept`, { method: "POST" }),
+    reject: (id: string) =>
+      request<CategorySuggestionItem>(`/suggestions/${id}/reject`, { method: "POST" }),
+    recurring: () =>
+      request<{
+        items: RecurringItem[];
+        subscriptions: RecurringItem[];
+        subscription_monthly_total: string;
+        note: string;
+      }>("/recurring"),
+    detectRecurring: () =>
+      request<{ detected: number; items: RecurringItem[] }>("/recurring/detect", {
+        method: "POST",
+      }),
+    confirmRecurring: (id: string) =>
+      request<RecurringItem>(`/recurring/${id}/confirm`, { method: "POST" }),
+    dismissRecurring: (id: string) =>
+      request<RecurringItem>(`/recurring/${id}/dismiss`, { method: "POST" }),
+  },
+
+  personal: {
+    insights: () => request<PersonalInsights>("/insights/personal"),
+    merchant: (merchant: string) =>
+      request<Record<string, unknown>>("/insights/merchant", { query: { merchant } }),
+    updatePreferences: (body: {
+      ai_consent?: boolean;
+      personalized_insights_enabled?: boolean;
+      insight_sensitivity?: string;
+      recurring_detection_enabled?: boolean;
+    }) =>
+      request<{
+        ai_consent: boolean;
+        personalized_insights_enabled: boolean;
+        insight_sensitivity: string;
+        recurring_detection_enabled: boolean;
+      }>("/insights/preferences", { method: "PATCH", body: json(body) }),
+  },
+
+  assistant: {
+    status: () => request<AssistantStatus>("/assistant/status"),
+    ask: (question: string) =>
+      request<AssistantAnswer>("/assistant/ask", {
+        method: "POST",
+        body: json({ question }),
+      }),
+    consent: (consent: boolean) =>
+      request<{ ai_consent: boolean }>("/assistant/consent", {
+        method: "POST",
+        body: json({ consent }),
+      }),
   },
 
   income: {

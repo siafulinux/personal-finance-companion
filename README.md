@@ -12,7 +12,11 @@ This is a working application, not a prototype: every number on screen is comput
 - **Bills** — recurring schedules, generated occurrences, deterministic payment matching, partial payments, reserves, calendar.
 - **CSV import** — column mapping, validation, duplicate detection, idempotent commit; try `samples/sample-transactions.csv`.
 - **Shopping Check** — "should I buy this?" answered from cash and category budget, never from a guess.
-- **Dashboard, cash-flow forecast, AI-ready tool registry** — structured, permission-checked payloads for a future assistant; no AI provider is called in Phase 1.
+- **Dashboard and cash-flow forecast** — one screen for Safe-to-Spend, the month's budget pulse, upcoming bills and a projected balance.
+- **Connected data (Phase 2)** — a provider-independent linking layer with a built-in **sandbox institution** (no bank credentials, no network) and a Plaid adapter that stays off until configured. Cursor-based incremental sync, duplicate suppression, pending→posted reconciliation, encrypted tokens and disconnect-with-deletion.
+- **Review queue and intelligence** — category suggestions with reasons (accepting makes them yours, so automation never overwrites them), recurring/subscription detection, and per-merchant unusual-transaction flags.
+- **Personalised insights** — explainable observations that carry their own evidence and stay silent until there is enough history.
+- **AI assistant foundation** — questions answered from the deterministic engine today; an optional model provider only ever explains those figures, and only after the user opts in.
 - **Web app** (React + TypeScript) and **Android app** (Kotlin + Compose) against the same API.
 - **Android parity** — first-run onboarding, record, edit and inspect transactions; import CSVs through the system document picker; confirm or reject server-suggested bill payments. No financial calculation is duplicated on the device.
 - **Operations** — migrations, demo seeding, backup/restore, health checks, test suites.

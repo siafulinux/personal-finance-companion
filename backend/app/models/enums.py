@@ -98,6 +98,60 @@ class IncomeFrequency(StrEnum):
     IRREGULAR = "irregular"
 
 
+class ProviderLinkStatus(StrEnum):
+    ACTIVE = "active"
+    ERROR = "error"
+    REAUTH_REQUIRED = "reauth_required"
+    DISCONNECTED = "disconnected"
+
+
+class SyncStatus(StrEnum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class SyncTrigger(StrEnum):
+    MANUAL = "manual"
+    SCHEDULED = "scheduled"
+    RECONNECT = "reconnect"
+
+
+class SuggestionSource(StrEnum):
+    RULE = "rule"
+    HISTORY = "history"
+    PROVIDER = "provider"
+
+
+class SuggestionStatus(StrEnum):
+    SUGGESTED = "suggested"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class CategorySource(StrEnum):
+    """Who decided a transaction's category. Guards user-confirmed choices."""
+
+    NONE = "none"
+    USER = "user"
+    RULE = "rule"
+    IMPORT = "import"
+    PROVIDER = "provider"
+
+
+class RecurringStatus(StrEnum):
+    DETECTED = "detected"
+    CONFIRMED = "confirmed"
+    DISMISSED = "dismissed"
+
+
+class InsightSensitivity(StrEnum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"

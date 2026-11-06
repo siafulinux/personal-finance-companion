@@ -457,3 +457,145 @@ export interface Forecast {
   }[];
   assumption: string;
 }
+
+// ---------------------------------------------------------------- Phase 2
+export interface ProviderInfo {
+  name: string;
+  display_name: string;
+  configured: boolean;
+  usable: boolean;
+  requires_credentials: boolean;
+  simulated: boolean;
+  note: string;
+}
+
+export interface LinkedAccountRef {
+  id: string;
+  name: string;
+  account_type: string;
+  external_account_id: string | null;
+}
+
+export interface SyncRunSummary {
+  id: string;
+  status: "running" | "success" | "partial" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  added: number;
+  modified: number;
+  removed: number;
+  skipped_duplicates: number;
+  suggestions_created?: number;
+  unmatched_pending?: number;
+  error_code?: string | null;
+  error_message?: string | null;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface ProviderLink {
+  id: string;
+  provider: string;
+  institution_name: string;
+  status: "active" | "error" | "reauth_required" | "disconnected";
+  last_synced_at: string | null;
+  last_success_at: string | null;
+  next_retry_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  failure_count: number;
+  consented_at: string | null;
+  disconnected_at: string | null;
+  history_start: string | null;
+  account_count: number;
+  accounts: LinkedAccountRef[];
+  last_run: (SyncRunSummary & { started_at: string }) | null;
+  has_stored_credential: boolean;
+}
+
+export interface CategorySuggestionItem {
+  id: string;
+  transaction_id: string;
+  category_id: string;
+  category_name: string | null;
+  category_color: string | null;
+  confidence: string;
+  source: "rule" | "history" | "provider";
+  status: "suggested" | "accepted" | "rejected";
+  reason: string | null;
+  transaction: {
+    description: string;
+    merchant: string | null;
+    amount: string;
+    txn_date: string;
+  } | null;
+}
+
+export interface RecurringItem {
+  id: string;
+  display_name: string;
+  merchant: string | null;
+  category_id: string | null;
+  average_amount: string;
+  last_amount: string;
+  frequency: string;
+  interval_days: number;
+  occurrences: number;
+  first_seen: string;
+  last_seen: string;
+  next_expected_date: string | null;
+  confidence: string;
+  is_subscription: boolean;
+  status: "detected" | "confirmed" | "dismissed";
+  detail: Record<string, unknown> | null;
+}
+
+export interface PersonalInsight {
+  type: string;
+  severity: "high" | "medium" | "low";
+  category_id?: string;
+  merchant?: string;
+  title: string;
+  message: string;
+  evidence: Record<string, string | number>;
+}
+
+export interface PersonalInsights {
+  enabled: boolean;
+  sensitivity: string;
+  minimum_history: { months: number; transactions: number };
+  insights: PersonalInsight[];
+  unusual_transactions: {
+    transaction_id: string;
+    description: string;
+    merchant: string | null;
+    amount: string;
+    txn_date: string;
+    typical_amount: string;
+    times_typical: number;
+    reason: string;
+  }[];
+  as_of?: string;
+  note?: string;
+}
+
+export interface AssistantStatus {
+  mode: string;
+  model_configured: boolean;
+  model: string | null;
+  consent_required: boolean;
+  ai_consent: boolean;
+  capabilities: string[];
+  can_modify_data: boolean;
+  note: string;
+}
+
+export interface AssistantAnswer {
+  question: string;
+  answer: string;
+  mode: string;
+  used_tools: string[];
+  data: Record<string, unknown>;
+  can_modify_data: boolean;
+  disclaimer: string;
+  note?: string;
+}

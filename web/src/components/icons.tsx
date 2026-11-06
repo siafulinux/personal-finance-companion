@@ -6,6 +6,48 @@ const common = {
   strokeLinejoin: "round" as const,
 };
 
+export function ConnectionsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <path d="M9.5 14.5 14.5 9.5" />
+      <path d="M11 6.5 12.8 4.7a3.9 3.9 0 0 1 5.5 5.5L16.5 12" />
+      <path d="M13 17.5l-1.8 1.8a3.9 3.9 0 0 1-5.5-5.5L7.5 12" />
+    </svg>
+  );
+}
+
+export function ReviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <path d="M9 3.5h6a2 2 0 0 1 2 2V20a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5.5a2 2 0 0 1 2-2Z" />
+      <path d="M9.5 8.5h5" />
+      <path d="M9.5 12h5" />
+      <path d="M9.5 15.5h3" />
+    </svg>
+  );
+}
+
+export function InsightsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <path d="M4 19V5" />
+      <path d="M4 19h16" />
+      <path d="M8 16v-4" />
+      <path d="M12.5 16V8" />
+      <path d="M17 16v-6" />
+    </svg>
+  );
+}
+
+export function AssistantIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <path d="M4 5.5h16v10H9l-4 3.5v-13.5Z" />
+      <path d="M8.5 10.5h7" />
+    </svg>
+  );
+}
+
 export function DashboardIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>

@@ -8,6 +8,56 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [Unreleased] — Phase 2.0 (connected data and intelligent finance foundation)
+
+### Added
+
+- **Provider-independent connectivity.** An adapter contract (`app/providers/base.py`)
+  replacing the Phase 1 stub, a deterministic **sandbox institution** that needs no
+  credentials or network, and a **Plaid** adapter (`/link/token/create`, item exchange,
+  cursor-based `/transactions/sync`, pending→posted linkage, `revoke`) that stays disabled
+  until `PLAID_CLIENT_ID` and `PLAID_SECRET` are set.
+- **Sync engine.** Cursor-based incremental sync with per-run counters, duplicate
+  suppression through the existing dedupe key, pending→posted reconciliation, removal
+  handling, retry/backoff state, sync history, and disconnect with optional deletion of the
+  accounts and transactions a link created. Provider access tokens are encrypted at rest and
+  removed on disconnect (`app/security/secrets.py`).
+- **Transaction intelligence.** Category suggestions with confidence, source and a stated
+  reason; accepting records the value as the user's own choice so later automation cannot
+  overwrite it, rejecting suppresses that rule. Recurring-series detection with subscription
+  classification and `subscription_monthly_total`, plus per-merchant unusual-transaction flags.
+- **Personalised insights.** Explainable observations (category over budget, habitually over
+  budget, repeated small purchases) each carrying an `evidence` block, behind a minimum-history
+  guard of three months and five transactions. Merchant profiles feed Shopping Check.
+- **AI assistant foundation.** Provider ABC with `openai_compatible` and `disabled`
+  implementations; the model only explains the output of the nine permission-checked tools and
+  never calculates. Without a provider the same questions are answered deterministically, and
+  figures leave the server only after explicit consent.
+- **Web pages** for connections and sync history, the review queue, personalised insights and
+  the assistant, wired into the existing shell and API client.
+- **Scheduled sync.** `pfc sync-links` plus `pfc-sync.service` / `pfc-sync.timer`, rendered by
+  `scripts/install-service`; the interval floor (`SYNC_MIN_INTERVAL_MINUTES`) keeps a frequent
+  timer from hammering a provider.
+- Migration `1d9d6ad34893` (additive only): `provider_links`, `provider_link_secrets`,
+  `sync_runs`, `category_suggestions`, `recurring_series` and four preference columns.
+- `docs/acceptance-phase-2.0.md`, `docs/phase-2-plan.md`, and
+  `backend/scripts/smoke_phase2.py` (35-check live end-to-end run).
+
+### Fixed
+
+- `formatDate()` no longer mixes `dateStyle`/`timeStyle` with day/month parts, which made
+  `Intl.DateTimeFormat` throw and blanked the Connections page whenever a sync run existed.
+- Insight and Shopping Check sentences now render amounts through `format_money` instead of
+  interpolating raw decimals; their `evidence` blocks stay machine-readable.
+
+### Known limits
+
+- Sandbox only: no live institution has been connected. The Plaid adapter is contract-tested
+  against a fake endpoint, never a real item. No webhook receiver yet. The AI assistant has
+  never run against a real model, and Android has no Phase 2 screens.
+
+---
+
 ## [Unreleased] — Phase 1.3 (reliability, transport and session hardening)
 
 ### Added

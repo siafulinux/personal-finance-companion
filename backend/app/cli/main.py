@@ -381,6 +381,37 @@ def dev(
     subprocess.run(command, cwd=BACKEND_ROOT)
 
 
+@app.command("sync-links")
+def sync_links(
+    limit: int = typer.Option(50, "--limit", help="Maximum links to attempt in one run."),
+) -> None:
+    """Synchronise every connected institution that is due (scheduled entry point).
+
+    One failing institution never stops the others: each result is recorded on its own
+    sync run and the link backs off before its next attempt.
+    """
+    from app.services.sync import sync_due_links
+
+    with SessionLocal() as db:
+        results = sync_due_links(db, limit=limit)
+        db.commit()
+    if not results:
+        _ok("No connected institutions are due for synchronisation.")
+        return
+    failures = 0
+    for row in results:
+        if row.get("status") == "failed":
+            failures += 1
+            _warn(f"{row['link_id']}: {row.get('error') or 'sync failed'}")
+        else:
+            _ok(
+                f"{row['link_id']}: {row['status']} "
+                f"(+{row['added']} ~{row['modified']} -{row['removed']})"
+            )
+    if failures:
+        raise typer.Exit(1)
+
+
 @app.command()
 def test(
     path: str = typer.Argument("tests"),

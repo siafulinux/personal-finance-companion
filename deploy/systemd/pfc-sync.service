@@ -1,0 +1,18 @@
+[Unit]
+Description=Personal Finance Companion scheduled institution sync
+After=network-online.target docker.service pfc-api.service
+Wants=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStartPre=%h/.local/lib/pfc/pfc-run wait-db
+ExecStart=%h/.local/lib/pfc/pfc-run sync
+# Network I/O, never urgent.
+Nice=10
+IOSchedulingClass=idle
+# A provider that hangs must not wedge the unit.
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal

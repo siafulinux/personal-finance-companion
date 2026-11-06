@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync connected institutions every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+# Spread the load so several installs do not hit a provider at the same instant.
+RandomizedDelaySec=300
+Persistent=true
+Unit=pfc-sync.service
+
+[Install]
+WantedBy=timers.target

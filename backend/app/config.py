@@ -55,6 +55,30 @@ class Settings(BaseSettings):
     demo_user_email: str = "demo@example.com"
     demo_user_password: str = "DemoPassword123!"
 
+    # --- Phase 2: financial connectivity ---
+    # Dedicated key for provider-token encryption. When unset, a key is derived from
+    # SECRET_KEY with HKDF, which is safe for development but ties the ciphertext to
+    # that secret: set this in any real deployment so SECRET_KEY can rotate.
+    provider_encryption_key: str | None = None
+    plaid_client_id: str | None = None
+    plaid_secret: str | None = None
+    plaid_environment: str = "sandbox"
+    plaid_base_url: str | None = None
+    plaid_webhook_url: str | None = None
+    # The bundled simulated institution. On by default: it needs no credentials.
+    sandbox_provider_enabled: bool = True
+    sync_page_size: int = 100
+    sync_max_pages: int = 50
+    # Minimum spacing between scheduled syncs for one link, in minutes.
+    sync_min_interval_minutes: int = 60
+
+    # --- Phase 2: AI assistant (optional; the app is fully usable without it) ---
+    ai_provider: str = "disabled"  # disabled | openai_compatible
+    ai_base_url: str = "https://api.openai.com/v1"
+    ai_api_key: str | None = None
+    ai_model: str = "gpt-4o-mini"
+    ai_timeout_seconds: int = 30
+
     @field_validator("database_url")
     @classmethod
     def _sync_driver(cls, value: str) -> str:

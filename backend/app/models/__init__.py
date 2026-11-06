@@ -4,6 +4,13 @@ from app.database.base import Base
 from app.models.account import BalanceAdjustment, Category, FinancialAccount
 from app.models.bill import Bill, BillOccurrence, BillPaymentMatch, MerchantAlias
 from app.models.budget import Budget, BudgetAllocation, PlannedReserve
+from app.models.connectivity import (
+    CategorySuggestion,
+    ProviderLink,
+    ProviderLinkSecret,
+    RecurringSeries,
+    SyncRun,
+)
 from app.models.import_job import ImportRecord, TransactionImport
 from app.models.transaction import Transaction
 from app.models.user import (
@@ -23,13 +30,18 @@ __all__ = [
     "Budget",
     "BudgetAllocation",
     "Category",
+    "CategorySuggestion",
     "FinancialAccount",
     "ImportRecord",
     "IncomeSource",
     "MerchantAlias",
     "NotificationPreference",
     "PlannedReserve",
+    "ProviderLink",
+    "ProviderLinkSecret",
+    "RecurringSeries",
     "RevokedToken",
+    "SyncRun",
     "Transaction",
     "TransactionImport",
     "User",

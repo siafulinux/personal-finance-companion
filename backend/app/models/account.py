@@ -48,15 +48,32 @@ class FinancialAccount(Base, UUIDPrimaryKey, TimestampMixin):
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     archived_at: Mapped[datetime | None] = mapped_column(nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    # Phase 4 integrations: which adapter produced this account, if any.
+    # Phase 2 integrations: which adapter produced this account, if any.
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     external_account_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("provider_links.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     user: Mapped["User"] = relationship(back_populates="accounts")  # noqa: F821
+    provider_link: Mapped["ProviderLink | None"] = relationship(  # noqa: F821
+        back_populates="accounts"
+    )
 
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_financial_accounts_user_name"),
         Index("ix_financial_accounts_user_active", "user_id", "is_archived"),
+        # A provider may report the same account on every sync; one row per account.
+        Index(
+            "uq_financial_accounts_provider_external",
+            "user_id",
+            "provider_link_id",
+            "external_account_id",
+            unique=True,
+            postgresql_where=text("external_account_id IS NOT NULL"),
+        ),
     )
 
     @property

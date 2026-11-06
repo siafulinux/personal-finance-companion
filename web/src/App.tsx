@@ -3,13 +3,17 @@ import { AppShell } from "./components/AppShell";
 import { LoadingBlock } from "./components/ui";
 import { useAuth } from "./context/AuthContext";
 import { AccountsPage } from "./pages/AccountsPage";
+import { AssistantPage } from "./pages/AssistantPage";
 import { BillsPage } from "./pages/BillsPage";
 import { BudgetsPage } from "./pages/BudgetsPage";
 import { CalendarPage } from "./pages/CalendarPage";
+import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { InsightsPage } from "./pages/InsightsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ShoppingPage } from "./pages/ShoppingPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
@@ -69,6 +73,10 @@ export function App() {
           <Route path="/bills" element={<BillsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/shopping" element={<ShoppingPage />} />
+          <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/review" element={<ReviewPage />} />
+          <Route path="/insights" element={<InsightsPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base
 from app.models.base import MONEY, TimestampMixin, UUIDPrimaryKey, str_enum
-from app.models.enums import IncomeFrequency, Theme
+from app.models.enums import IncomeFrequency, InsightSensitivity, Theme
 
 
 class User(Base, UUIDPrimaryKey, TimestampMixin):
@@ -96,6 +96,19 @@ class UserPreference(Base, TimestampMixin):
         MONEY, nullable=False, server_default="0.55"
     )
     week_starts_on: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Phase 2: explicit consent before any financial data is sent to an AI provider.
+    ai_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    personalized_insights_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    insight_sensitivity: Mapped[str] = mapped_column(
+        str_enum(InsightSensitivity, "insight_sensitivity_enum"),
+        nullable=False,
+        server_default=InsightSensitivity.NORMAL.value,
+    )
+    recurring_detection_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     theme: Mapped[str] = mapped_column(
         str_enum(Theme, "theme_enum"), nullable=False, server_default="system"
     )

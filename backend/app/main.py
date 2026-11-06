@@ -11,7 +11,19 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.ai.provider import ai_status
-from app.api import accounts, auth, bills, budgets, categories, imports, insights, transactions
+from app.api import (
+    accounts,
+    assistant,
+    auth,
+    bills,
+    budgets,
+    categories,
+    connectivity,
+    imports,
+    insights,
+    intelligence,
+    transactions,
+)
 from app.config import settings
 from app.database.base import SessionLocal
 from app.logging_config import configure_logging
@@ -100,6 +112,9 @@ def create_app() -> FastAPI:
     app.include_router(budgets.router, prefix=API_PREFIX)
     app.include_router(bills.router, prefix=API_PREFIX)
     app.include_router(insights.router, prefix=API_PREFIX)
+    app.include_router(connectivity.router, prefix=API_PREFIX)
+    app.include_router(intelligence.router, prefix=API_PREFIX)
+    app.include_router(assistant.router, prefix=API_PREFIX)
 
     @app.get(f"{API_PREFIX}/health", tags=["meta"])
     def health() -> dict:
