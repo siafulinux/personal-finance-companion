@@ -1,27 +1,33 @@
-<?xml version="1.0" encoding="utf-8"?>
 <!--
-  The finance server is reached over HTTPS with a certificate issued by the
-  project's own Caddy internal CA. That CA is bundled as a raw resource so the
-  certificate chains without disabling verification or trusting every user CA.
+  The app talks to a finance server its owner chose, so two transport modes exist:
 
-  Cleartext stays available for loopback only, so `adb reverse` debugging on
-  127.0.0.1 keeps working. Everything else must be HTTPS.
+  1. HTTPS. Public names (https://finance.example.com) must use it. Certificates
+     are verified against the system roots plus the project's own Caddy internal
+     CA, which is bundled as a raw resource, so a self-signed LAN install chains
+     without disabling verification or trusting every user CA.
+
+  2. HTTP on the owner's own network (http://192.168.1.100:8088), which is what a
+     container install answers on before a domain or tunnel exists.
+
+  Android's network-security-config cannot express "cleartext to RFC1918 only":
+  <domain> takes host names, not address ranges. Cleartext is therefore permitted
+  at the platform level and the policy is enforced in the app instead — ServerUrl
+  refuses http:// for anything that is not loopback, RFC1918, link-local, a ULA,
+  .local/.lan/.home.arpa or a single-label LAN host. That check runs before any
+  request is built, so a public host is always HTTPS in practice.
+
+  Android still shows its own indication when a request is unencrypted.
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
             <certificates src="@raw/pfc_ca" />
         </trust-anchors>
     </base-config>
 
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-    </domain-config>
-
-    <!-- Debug builds additionally accept a user-installed CA, e.g. an
-         `adb install`-time certificate for ad-hoc troubleshooting. -->
+    <!-- Debug builds additionally accept a user-installed CA, e.g. a certificate
+         installed by hand for ad-hoc troubleshooting. -->
     <debug-overrides>
         <trust-anchors>
             <certificates src="user" />

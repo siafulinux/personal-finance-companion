@@ -13,16 +13,19 @@ android {
         applicationId = "com.pfc.companion"
         minSdk = 26
         targetSdk = 36
-        // 0.2.0: transaction create/edit, CSV import over SAF, secure token storage and
-        // the bundled project CA, none of which shipped in the 0.1.0 baseline.
-        versionCode = 2
-        versionName = "0.2.0"
+        // 0.3.0: the app now points at any self-hosted server the user chooses,
+        // with per-server sessions, instead of one hardcoded address.
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
         // goes through the Caddy TLS front (port 8443). Change it in Settings for
         // a physical device, using the host's LAN address and the same port.
         buildConfigField("String", "API_BASE_URL", "\"https://10.0.2.2:8443/api/v1/\"")
+        // The API generation this build speaks. A server reporting a lower
+        // /server/info api_version is too old to connect to.
+        buildConfigField("int", "CLIENT_API_VERSION", "1")
     }
 
     buildTypes {

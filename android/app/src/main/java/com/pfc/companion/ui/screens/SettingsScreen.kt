@@ -1,30 +1,34 @@
 package com.pfc.companion.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pfc.companion.ServiceLocator
+import com.pfc.companion.data.ServerUrl
 import com.pfc.companion.ui.components.ErrorPane
 import com.pfc.companion.ui.components.LoadingPane
 import com.pfc.companion.ui.components.Pill
@@ -33,6 +37,8 @@ import com.pfc.companion.ui.components.ScreenHeader
 import com.pfc.companion.ui.components.SectionCard
 import com.pfc.companion.ui.components.UiState
 import com.pfc.companion.ui.components.rememberScreenViewModel
+import com.pfc.companion.ui.vm.ServerConnectionViewModel
+import com.pfc.companion.ui.vm.ServerTestState
 import com.pfc.companion.ui.vm.SettingsViewModel
 
 private val themes = listOf("system" to "System", "light" to "Light", "dark" to "Dark")
@@ -41,11 +47,8 @@ private val themes = listOf("system" to "System", "light" to "Light", "dark" to 
 fun SettingsScreen(onSignOut: () -> Unit) {
     val viewModel = rememberScreenViewModel("settings") { SettingsViewModel(ServiceLocator.repository) }
     val profileState by viewModel.profile.collectAsStateWithLifecycle()
-    val baseUrl by viewModel.baseUrl.collectAsState()
-    val theme by viewModel.theme.collectAsState()
-    val message by viewModel.message.collectAsState()
-
-    var serverDraft by remember(baseUrl) { mutableStateOf(baseUrl) }
+    val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -92,7 +95,7 @@ fun SettingsScreen(onSignOut: () -> Unit) {
                         Pill("Demo data", PillTone.Warning)
                     }
                 }
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.padding(top = 8.dp))
                 Text(
                     "${current.data.user.timezone} · ${current.data.user.currency}",
                     style = MaterialTheme.typography.labelSmall,
@@ -101,26 +104,7 @@ fun SettingsScreen(onSignOut: () -> Unit) {
             }
         }
 
-        SectionCard(
-            title = "Server address",
-            subtitle = "The API the app talks to. Emulators reach the host at 10.0.2.2.",
-        ) {
-            OutlinedTextField(
-                value = serverDraft,
-                onValueChange = { serverDraft = it },
-                label = { Text("API base URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 10.dp))
-            Button(
-                onClick = { viewModel.saveServer(serverDraft) },
-                enabled = serverDraft.isNotBlank() && serverDraft != baseUrl,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Save server address")
-            }
-        }
+        ServerConnectionSection()
 
         SectionCard(title = "Appearance") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -136,11 +120,11 @@ fun SettingsScreen(onSignOut: () -> Unit) {
 
         SectionCard(title = "Session") {
             Text(
-                "Signing out removes the access token from this device. Your ledger stays on the server.",
+                "Signing out removes this server's access token from the device. Your ledger stays on the server.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(top = 10.dp))
+            Spacer(Modifier.height(10.dp))
             OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {
                 Text("Sign out")
             }
@@ -148,11 +132,181 @@ fun SettingsScreen(onSignOut: () -> Unit) {
 
         SectionCard(title = "About this phase") {
             Text(
-                "Phase 1 covers accounts, transactions, budgets, bills, CSV import on the web, Safe-to-Spend and Shopping Check. " +
-                    "AI assistance and location features are prepared for but intentionally off.",
+                "Phase 2 connects the app to any self-hosted server. Bank synchronization, insights and the assistant " +
+                    "live in the web app; this app reads the same authoritative numbers.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * Points the app at a server. Saving requires a successful test first, so a typo
+ * cannot strand the user on an address nothing answers at.
+ */
+@Composable
+private fun ServerConnectionSection() {
+    val viewModel = rememberScreenViewModel("settings-server") {
+        ServerConnectionViewModel(ServiceLocator.repository)
+    }
+    val draft by viewModel.draft.collectAsStateWithLifecycle()
+    val test by viewModel.test.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    val validationError by viewModel.validationError.collectAsStateWithLifecycle()
+    val currentBaseUrl by viewModel.currentBaseUrl.collectAsStateWithLifecycle()
+    val savedServers by viewModel.savedServers.collectAsStateWithLifecycle()
+    val saving by viewModel.saving.collectAsStateWithLifecycle()
+
+    val parsed = (ServerUrl.parse(draft) as? ServerUrl.Result.Valid)?.parsed
+
+    SectionCard(
+        title = "Server",
+        subtitle = "The installation this phone reads and writes.",
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "IN USE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    ServerUrl.displayAddress(currentBaseUrl).ifBlank { "—" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (parsed != null && parsed.apiBaseUrl == currentBaseUrl) {
+                Pill("Current", PillTone.Positive)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = draft,
+            onValueChange = viewModel::onDraftChange,
+            label = { Text("Server address") },
+            placeholder = { Text("192.168.1.100:8088") },
+            singleLine = true,
+            isError = validationError != null || test is ServerTestState.Unreachable,
+            supportingText = {
+                Text(
+                    validationError
+                        ?: "The address you open the web app at. https:// for a public name, http:// only on your own network."
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        if (parsed?.insecure == true) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Plain HTTP on your local network: traffic is not encrypted. Fine on a trusted LAN, not over the internet.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+        when (val state = test) {
+            ServerTestState.Idle, is ServerTestState.Invalid -> Unit
+            ServerTestState.Testing -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("Contacting the server…", style = MaterialTheme.typography.bodySmall)
+            }
+            is ServerTestState.Unreachable -> Text(
+                state.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            is ServerTestState.Reachable -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Pill("Reachable", PillTone.Positive)
+                    Text(
+                        state.info.serverName.ifBlank { state.info.appName },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    "Version ${state.info.version} · API v${state.info.apiVersion}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.info.webUrl.isNotBlank()) {
+                    Text(
+                        "Web app: ${state.info.webUrl}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.info.needsSetup) {
+                    Text(
+                        "This server still needs its first-run setup. Open ${state.info.webUrl} to create the owner account.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = viewModel::testConnection,
+                enabled = draft.isNotBlank() && test !is ServerTestState.Testing,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Test connection")
+            }
+            Button(
+                onClick = viewModel::save,
+                enabled = test is ServerTestState.Reachable && !saving,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(if (saving) "Saving…" else "Save server")
+            }
+        }
+
+        if (message != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                message!!,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        if (savedServers.size > 1) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "RECENT SERVERS",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                savedServers.forEach { saved ->
+                    AssistChip(
+                        onClick = { viewModel.useSaved(saved) },
+                        label = { Text(ServerUrl.displayAddress(saved), maxLines = 1) },
+                    )
+                }
+            }
         }
     }
 }

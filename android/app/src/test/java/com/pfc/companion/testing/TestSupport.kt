@@ -18,13 +18,23 @@ import kotlinx.coroutines.test.resetMain
 
 class InMemorySession(initialBaseUrl: String) : SessionState {
     private val tokenState = MutableStateFlow<String?>("test-token")
+    private val baseState = MutableStateFlow(initialBaseUrl)
+    private val themeState = MutableStateFlow("system")
+    private val serverState = MutableStateFlow(listOf(initialBaseUrl))
+
+    /** Last address handed to [saveBaseUrl], so tests can assert what was selected. */
+    var savedBaseUrl: String? = null
+        private set
+
     override val tokenFlow: Flow<String?> = tokenState
-    override val baseUrlFlow: Flow<String> = MutableStateFlow(initialBaseUrl)
-    override val themeFlow: Flow<String> = MutableStateFlow("system")
+    override val baseUrlFlow: Flow<String> = baseState
+    override val themeFlow: Flow<String> = themeState
+    override val savedServers: Flow<List<String>> = serverState
 
     override suspend fun token(): String? = tokenState.value
-    override suspend fun baseUrl(): String = baseUrlFlow.first()
-    override suspend fun theme(): String = "system"
+    override suspend fun baseUrl(): String = baseState.value
+    override suspend fun theme(): String = themeState.value
+
     override suspend fun saveToken(value: String) {
         tokenState.value = value
     }
@@ -33,8 +43,19 @@ class InMemorySession(initialBaseUrl: String) : SessionState {
         tokenState.value = null
     }
 
-    override suspend fun saveBaseUrl(value: String) = Unit
-    override suspend fun saveTheme(value: String) = Unit
+    override suspend fun saveBaseUrl(value: String) {
+        savedBaseUrl = value
+        baseState.value = value
+        rememberServer(value)
+    }
+
+    override suspend fun rememberServer(apiBaseUrl: String) {
+        serverState.value = (listOf(apiBaseUrl) + serverState.value).distinct()
+    }
+
+    override suspend fun saveTheme(value: String) {
+        themeState.value = value
+    }
 }
 
 fun repositoryFor(server: MockWebServer): FinanceRepository {

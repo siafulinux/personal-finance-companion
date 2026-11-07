@@ -43,14 +43,6 @@ class SettingsViewModel(private val repository: FinanceRepository) : ViewModel()
         }
     }
 
-    fun saveServer(value: String) {
-        viewModelScope.launch {
-            repository.saveBaseUrl(value.trim())
-            _message.value = "Server address saved."
-            refresh()
-        }
-    }
-
     fun setTheme(value: String) {
         viewModelScope.launch {
             repository.saveTheme(value)

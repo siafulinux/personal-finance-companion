@@ -2,6 +2,7 @@ package com.pfc.companion.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pfc.companion.ServiceLocator
 import com.pfc.companion.data.ApiException
+import com.pfc.companion.data.ServerUrl
 import kotlinx.coroutines.launch
 import java.util.TimeZone
 
@@ -48,10 +51,15 @@ fun LoginScreen() {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
-    var serverUrl by remember(storedBaseUrl) { mutableStateOf(storedBaseUrl) }
+    var serverUrl by remember(storedBaseUrl) { mutableStateOf(ServerUrl.displayAddress(storedBaseUrl)) }
     var showServer by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Filled in only after /server/info answers, so the address can be verified
+    // before the user spends a sign-in attempt on it.
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    var testOk by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -123,12 +131,62 @@ fun LoginScreen() {
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = serverUrl,
-                        onValueChange = { serverUrl = it },
+                        onValueChange = {
+                            serverUrl = it
+                            // A result belongs to the address that was tested.
+                            testResult = null
+                            testOk = false
+                        },
                         label = { Text("Server address") },
-                        supportingText = { Text("Include the /api/v1 path, e.g. http://192.168.1.20:8010/api/v1/") },
+                        supportingText = {
+                            Text("The address you open the web app at, e.g. http://192.168.1.100:8088 or https://finance.example.com")
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        OutlinedButton(
+                            enabled = serverUrl.isNotBlank() && !testing,
+                            onClick = {
+                                testResult = null
+                                testOk = false
+                                when (val parsed = ServerUrl.parse(serverUrl)) {
+                                    is ServerUrl.Result.Invalid -> testResult = parsed.reason
+                                    is ServerUrl.Result.Valid -> {
+                                        testing = true
+                                        scope.launch {
+                                            try {
+                                                val info = repository.serverInfo(parsed.parsed.apiBaseUrl)
+                                                testOk = true
+                                                testResult = "Reachable · " +
+                                                    info.serverName.ifBlank { info.appName } +
+                                                    " v" + info.version
+                                            } catch (err: Exception) {
+                                                testResult = (err as? ApiException)?.message
+                                                    ?: "Could not reach that server. Check the address and that you are on the same network."
+                                            } finally {
+                                                testing = false
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(if (testing) "Checking…" else "Test connection")
+                        }
+                        if (testResult != null) {
+                            Text(
+                                testResult!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (testOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 }
 
                 if (error != null) {
@@ -143,8 +201,19 @@ fun LoginScreen() {
                         busy = true
                         scope.launch {
                             try {
-                                if (serverUrl.isNotBlank() && serverUrl != storedBaseUrl) {
-                                    repository.saveBaseUrl(serverUrl.trim())
+                                // Validate before touching the saved session: an
+                                // unusable address must not sign the user out of a
+                                // working server.
+                                when (val parsed = ServerUrl.parse(serverUrl)) {
+                                    is ServerUrl.Result.Invalid -> {
+                                        error = parsed.reason
+                                        return@launch
+                                    }
+                                    is ServerUrl.Result.Valid -> {
+                                        if (parsed.parsed.apiBaseUrl != storedBaseUrl) {
+                                            repository.saveBaseUrl(parsed.parsed.apiBaseUrl)
+                                        }
+                                    }
                                 }
                                 if (mode == 1) {
                                     repository.register(
