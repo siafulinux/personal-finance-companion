@@ -144,9 +144,9 @@ regenerate the file with `./gradlew updateDaemonJvm --jvm-version=17`.
 
 ## Installing on a physical device
 
-The APK is not tied to the emulator or to this machine. Version `0.3.0` (`versionCode` 3) is
+The APK is not tied to the emulator or to this machine. Version `0.3.2` (`versionCode` 5) is
 built from this tree; the exported copy is
-`personal-finance-companion-0.3.0-debug.apk` in `/opt/lampp/htdocs/downloads`.
+`personal-finance-companion-0.3.2-debug.apk` in `/opt/lampp/htdocs/downloads`.
 
 1. **Build** the debug APK (see above) — `app/build/outputs/apk/debug/app-debug.apk`.
 2. **Enable developer options and USB debugging** on the phone, then confirm the host sees
@@ -166,6 +166,35 @@ loopback only.
 
 No runtime permissions are needed: there is no storage, location or contacts request, and
 CSV files are read through the system document picker.
+
+## "Request failed (404)" on a working server
+
+A 404 from a server that is obviously up is almost always the address, not the deployment.
+The app builds every request by appending to the stored server address, so a stored value
+that already carries part of the API path makes the app ask the wrong URL:
+
+| Stored address | Request | Result |
+| --- | --- | --- |
+| `https://192.168.1.5:8443/api` | `/api/api/v1/auth/me` | **404** |
+| `https://192.168.1.5:8443` (no path) | `/auth/me` | web app HTML with 200 — a JSON parse error |
+| `https://192.168.1.5:8443` (correct) | `/api/v1/auth/me` | 200 |
+
+App data survives reinstallation, so a value written by an older build keeps failing after
+the code that wrote it is gone. Since 0.3.2 the app canonicalises the address when it builds
+a request (and when it shows the address in Settings), so `/api`, `/api/v1`, `/v1` and a bare
+origin all resolve to `origin/api/v1/`. Nothing in storage is rewritten — the bearer token is
+keyed by the stored address, and rewriting that key would silently sign the user out.
+
+To check a server by hand, ask for a route that requires authentication; 401 means the route
+exists and only the token is missing, while 404 means the path is wrong:
+
+```bash
+curl -sk -o /dev/null -w '%{http_code}\n' https://192.168.1.5:8443/api/v1/auth/me
+# 401 expected; compare with /auth/me, which answers 200 with the web app's HTML
+```
+
+A 200 that is not JSON is reported as such on screen, and a 404 now says the server is
+reachable but has no API at that address — both point at the address, not at an outage.
 
 ## Security notes
 

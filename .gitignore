@@ -40,11 +40,15 @@ android/.idea/
 *.aab
 android/tooling/
 
-# Data & backups (never commit real financial data)
-data/
-backups/
-!data/.gitkeep
-!backups/.gitkeep
+# Data & backups (never commit real financial data).
+# Anchored to the repository root on purpose: an unanchored `data/` also matched
+# the Android source package `android/app/src/main/java/com/pfc/companion/data/`,
+# which silently kept the app's entire data layer (API client, token store,
+# server-address parsing) out of version control.
+/data/
+/backups/
+!/data/.gitkeep
+!/backups/.gitkeep
 
 # Logs / runtime
 logs/

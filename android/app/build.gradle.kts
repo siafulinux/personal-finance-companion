@@ -15,8 +15,13 @@ android {
         targetSdk = 36
         // 0.3.0: the app now points at any self-hosted server the user chooses,
         // with per-server sessions, instead of one hardcoded address.
-        versionCode = 3
-        versionName = "0.3.0"
+        // 0.3.1: a stored server address without /api/v1 is repaired before each
+        // request, so a value carried over from an earlier install cannot 404.
+        // 0.3.2: so is an address holding only part of that path (`/api`, `/v1`),
+        // and the address field shows the origin instead of a value the same form
+        // would reject.
+        versionCode = 5
+        versionName = "0.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
