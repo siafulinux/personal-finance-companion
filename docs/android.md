@@ -20,7 +20,8 @@ renders server responses and never computes balances locally.
 - **Bills** — recurring bills, occurrences, mark-paid, and the server's payment-match
   suggestions with confirm/reject actions.
 - **Budgets and Shopping Check** — the same server engines the web app uses.
-- **Settings** — server address, theme and sign-out.
+- **Server connection** — set and test the address of any self-hosted installation, save it, and switch between servers later. Sessions are per server. Details: `docs/android-server-connection.md`.
+- **Settings** — account, server connection, theme and sign-out.
 
 Screens refresh when they resume, so a transaction created in the app is reflected in
 budgets, bills and Safe-to-Spend without a separate local projection.
@@ -114,12 +115,12 @@ Compose screen → ViewModel → FinanceRepository → ApiClient (OkHttp)
 - Only the access token, server URL and theme are stored on the device (DataStore).
 - The ledger, accounts, bills and budgets are fetched on demand; there is no separate
   financial cache that could disagree with the web app.
-- The default base URL is `https://10.0.2.2:8443/api/v1/` — the host machine as seen from
-  an emulator, through the Caddy TLS front. For a physical device, set the LAN URL in
-  **Settings → Server address**.
+- The base URL is whatever server the user saved; the build only supplies a first-launch
+  default (`https://10.0.2.2:8443/api/v1/`, the emulator's view of the host). Pointing the
+  app at another installation requires no rebuild — see `docs/android-server-connection.md`.
 - The session token lives in `SecureTokenStore`: encrypted with an AES/GCM key held by the
-  Android Keystore, never in plain preferences. Only the server URL and theme stay in
-  DataStore.
+  Android Keystore, never in plain preferences. It is stored per server, so switching
+  addresses never carries a token across. Only the server URL and theme stay in DataStore.
 - Signing out calls `POST /auth/logout`, which records the token ID server-side, so the
   token stops working immediately even if it was copied off the device. Expired or revoked
   tokens produce a `401` and the app returns to the sign-in screen.
@@ -128,7 +129,7 @@ Compose screen → ViewModel → FinanceRepository → ApiClient (OkHttp)
 
 ```bash
 cd android
-./gradlew :app:testDebugUnitTest      # 31 unit tests
+./gradlew :app:testDebugUnitTest      # 53 unit tests
 ./gradlew :app:assembleDebug          # APK: app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:assembleDebugAndroidTest
 ```
@@ -143,19 +144,21 @@ regenerate the file with `./gradlew updateDaemonJvm --jvm-version=17`.
 
 ## Installing on a physical device
 
-The APK is not tied to the emulator, but the server must be reachable over HTTPS from the
-device:
+The APK is not tied to the emulator or to this machine. Version `0.3.0` (`versionCode` 3) is
+built from this tree; the exported copy is
+`personal-finance-companion-0.3.0-debug.apk` in `/opt/lampp/htdocs/downloads`.
 
 1. **Build** the debug APK (see above) — `app/build/outputs/apk/debug/app-debug.apk`.
 2. **Enable developer options and USB debugging** on the phone, then confirm the host sees
    it: `adb devices`.
 3. **Install**: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
-4. **Point the app at the server** in **Settings → Server address**:
-   `https://<host-lan-ip>:8443/api/v1/` (the certificate covers the LAN address recorded in
-   `PFC_LAN_IP` when `scripts/gen-tls` last ran; re-run it if the address changed, then
-   rebuild the APK so the bundled CA resource is current).
-5. **Sign in** with a real account. No certificate warning appears: the project CA is
-   bundled, and verification stays enabled.
+4. **Point the app at your server**: the sign-in screen has **Server settings**, and after
+   sign-in it is **Settings → Server**. Enter the address, tap **Test connection**, then
+   **Save server**. A Docker install on the LAN is `http://<host-lan-ip>:8088`; a public
+   domain is `https://finance.example.com`.
+5. **Sign in** with a real account on that server. No certificate warning appears for the
+   project CA: it is bundled and verification stays enabled. Plain HTTP is accepted only
+   for private network addresses, and the screen says so when it is in use.
 
 The phone must be on the same trusted network as the host. If it cannot connect, check
 that the host firewall allows TCP 8443 — the API and web server themselves listen on

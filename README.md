@@ -18,7 +18,8 @@ This is a working application, not a prototype: every number on screen is comput
 - **Personalised insights** — explainable observations that carry their own evidence and stay silent until there is enough history.
 - **AI assistant foundation** — questions answered from the deterministic engine today; an optional model provider only ever explains those figures, and only after the user opts in.
 - **Web app** (React + TypeScript) and **Android app** (Kotlin + Compose) against the same API.
-- **Android parity** — first-run onboarding, record, edit and inspect transactions; import CSVs through the system document picker; confirm or reject server-suggested bill payments. No financial calculation is duplicated on the device.
+- **Self-hosted Docker deployment** — one Compose project with PostgreSQL, the API, a background sync worker, the web app behind nginx and Caddy as the only public port. A first-run wizard claims the server and creates its owner, `/api/v1/server/info` tells a client what it connected to, and the Android app accepts any server address instead of a built-in one.
+- **Android parity** — first-run onboarding, record, edit and inspect transactions; import CSVs through the system document picker; confirm or reject server-suggested bill payments; point the app at any self-hosted server and switch later. No financial calculation is duplicated on the device.
 - **Operations** — migrations, demo seeding, backup/restore, health checks, test suites.
 
 ## Stack
@@ -195,6 +196,31 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 - Responses are `no-store`; security headers are applied globally; passwords use Argon2id; login errors are generic.
 - No external analytics, bank aggregators, or AI calls in Phase 1. Location is not requested or stored.
 
+## Self-hosted deployment (Docker)
+
+For running the whole application on your own machine, independent of this repository's
+development setup:
+
+```bash
+cd deploy/docker
+cp .env.example .env            # set POSTGRES_PASSWORD and SECRET_KEY
+$EDITOR .env
+docker compose up -d --build
+```
+
+Then open `http://<server>:8088/` and complete the first-run wizard (server name, owner
+account, registration policy). Point the Android app at the same address —
+`http://192.168.1.5:8088` on a LAN, or `https://finance.example.com` behind TLS.
+
+- [Docker deployment](docs/docker-deployment.md) — services, commands, migration of an
+  existing database, troubleshooting.
+- [Server configuration](docs/server-configuration.md) — `/server/info`, registration policy,
+  pairing, environment variables.
+- [Android server connection](docs/android-server-connection.md) — how a phone finds and
+  trusts your server.
+- [Remote access](docs/remote-access.md) — trusted LAN, public HTTPS, tunnels, and what is
+  still unverified.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — engine, data model, import pipeline, decisions.
@@ -204,6 +230,7 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 - [Phase 1.1 report](docs/acceptance-phase-1.1.md) — Android transaction/import tests and results.
 - [Phase 1.2 report](docs/acceptance-phase-1.2.md) — end-to-end validation, hardening, backup/restore and security evidence.
 - [Phase 1.3 report](docs/acceptance-phase-1.3.md) — recovery gate, service supervision, LAN TLS, session revocation and remaining risks.
+- [Phase 2 Docker report](docs/acceptance-phase-2-docker.md) — the self-hosted deployment, first-run setup, Android connectivity and what remains unverified.
 - [Backups](docs/backups.md) — the weekly dump/verify/prune routine, retention, restore drill and what it does not cover.
 - [Reboot verification](docs/boot-verification.md) — how to prove the supervised stack returns after a reboot, and what to check when it does not.
 - [Changelog](CHANGELOG.md) — release history, including the 2026-11-03 data loss and the restore that produced the `v0.1.0-recovered` baseline.
@@ -211,7 +238,10 @@ All settings live in `.env` (see `.env.example`): network ports, database URL, s
 ## Limits
 
 - Single currency (USD) and single user per account; no sharing or households.
-- No bank connections; data arrives by manual entry or CSV.
+- No live bank connections; data arrives by manual entry, CSV, or the sandbox institution.
 - No AI provider is wired in; the tool layer and provider interface are ready for one.
+- The Docker deployment serves plain HTTP on a trusted LAN by default; a public HTTPS
+  deployment needs a domain and a certificate, and that path is documented but not yet
+  verified on this machine.
 - Android has no offline cache; it requires the server. Android onboarding creates one opening account; categories, budgets and bills are still created in the web app, and transaction deletion is web-only.
 - Bill reminders and location features are designed for later phases and off by default.
