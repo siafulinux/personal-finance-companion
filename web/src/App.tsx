@@ -1,7 +1,10 @@
+import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
-import { LoadingBlock } from "./components/ui";
+import { Button, Card, LoadingBlock } from "./components/ui";
 import { useAuth } from "./context/AuthContext";
+import { api } from "./lib/api";
+import type { ServerInfo } from "./lib/types";
 import { AccountsPage } from "./pages/AccountsPage";
 import { AssistantPage } from "./pages/AssistantPage";
 import { BillsPage } from "./pages/BillsPage";
@@ -14,7 +17,9 @@ import { LoginPage } from "./pages/LoginPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { ServerPage } from "./pages/ServerPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SetupPage } from "./pages/SetupPage";
 import { ShoppingPage } from "./pages/ShoppingPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
@@ -24,6 +29,52 @@ function FullScreenLoader() {
       <LoadingBlock label="Opening your ledger" />
     </div>
   );
+}
+
+function ServerUnreachable({ message }: { message: string }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "1rem" }}>
+      <Card style={{ maxWidth: 460 }}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.4rem" }}>Cannot reach this server</h2>
+        <p className="tiny muted" style={{ marginBottom: "1rem" }}>
+          {message} If the stack was just started, wait a moment and try again.
+        </p>
+        <Button onClick={() => window.location.reload()}>Try again</Button>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Reads the public server info once per load. A server with no accounts shows
+ * the first-run wizard instead of a login form; anything else proceeds to the
+ * normal routes.
+ */
+function ServerGate({ children }: { children: ReactNode }) {
+  const [info, setInfo] = useState<ServerInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.server
+      .info()
+      .then((next) => {
+        if (!cancelled) setInfo(next);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "The server did not answer.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) return <ServerUnreachable message={error} />;
+  if (!info) return <FullScreenLoader />;
+  if (info.setup_required) return <SetupPage />;
+  return <>{children}</>;
 }
 
 function RequireAuth() {
@@ -54,7 +105,8 @@ function PublicOnly() {
 
 export function App() {
   return (
-    <Routes>
+    <ServerGate>
+      <Routes>
       <Route element={<PublicOnly />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
@@ -77,11 +129,13 @@ export function App() {
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/server" element={<ServerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </ServerGate>
   );
 }

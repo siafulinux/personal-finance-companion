@@ -12,6 +12,7 @@ import {
   InsightsIcon,
   MoonIcon,
   ReviewIcon,
+  ServerIcon,
   SettingsIcon,
   ShoppingIcon,
   SunIcon,
@@ -31,6 +32,7 @@ const NAV = [
   { to: "/review", label: "Review", icon: <ReviewIcon /> },
   { to: "/insights", label: "Insights", icon: <InsightsIcon /> },
   { to: "/assistant", label: "Assistant", icon: <AssistantIcon /> },
+  { to: "/server", label: "Server", icon: <ServerIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 

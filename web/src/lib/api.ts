@@ -13,7 +13,10 @@ import type {
   MatchSuggestionGroup,
   NotificationPreferences,
   Occurrence,
+  PairingCode,
   Preferences,
+  ServerInfo,
+  ServerSettingsView,
   Profile,
   SafeToSpend,
   ShoppingResult,
@@ -108,6 +111,35 @@ async function request<T>(
 const json = (body: unknown) => JSON.stringify(body);
 
 export const api = {
+  server: {
+    // Public: this is how a browser or phone that knows only a URL learns what
+    // it is talking to, and whether the server still needs its first-run setup.
+    info: () => request<ServerInfo>("/server/info"),
+    setup: (body: {
+      server_name: string;
+      admin_email: string;
+      admin_name: string;
+      admin_password: string;
+      registration_enabled: boolean;
+      public_base_url?: string | null;
+    }) => request<{ server: ServerInfo }>("/server/setup", { method: "POST", body: json(body) }),
+    settings: () =>
+      request<{ server: ServerInfo; settings: ServerSettingsView }>("/server/settings"),
+    updateSettings: (body: {
+      server_name?: string;
+      registration_enabled?: boolean;
+      public_base_url?: string | null;
+    }) =>
+      request<{ server: ServerInfo; settings: ServerSettingsView }>("/server/settings", {
+        method: "PATCH",
+        body: json(body),
+      }),
+    createPairing: (label?: string) =>
+      request<PairingCode>("/server/pairing", {
+        method: "POST",
+        body: json({ label: label || null }),
+      }),
+  },
   auth: {
     register: (body: {
       email: string;

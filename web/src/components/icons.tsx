@@ -16,6 +16,16 @@ export function ConnectionsIcon() {
   );
 }
 
+export function ServerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <rect x="3.5" y="4" width="17" height="6" rx="1.6" />
+      <rect x="3.5" y="14" width="17" height="6" rx="1.6" />
+      <path d="M7 7h.01M7 17h.01" />
+    </svg>
+  );
+}
+
 export function ReviewIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>

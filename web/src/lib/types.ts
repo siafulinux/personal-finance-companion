@@ -589,6 +589,35 @@ export interface AssistantStatus {
   note: string;
 }
 
+export interface ServerInfo {
+  app_name: string;
+  server_name: string;
+  version: string;
+  api_version: number;
+  min_client_api_version: number;
+  api_base_url: string;
+  web_url: string;
+  status: string;
+  registration_enabled: boolean;
+  setup_required: boolean;
+}
+
+export interface ServerSettingsView {
+  server_name: string;
+  registration_enabled: boolean;
+  public_base_url: string | null;
+  is_admin: boolean;
+  setup_required?: boolean;
+}
+
+export interface PairingCode {
+  token: string;
+  expires_at: string;
+  ttl_minutes: number;
+  pairing_url: string;
+  connection: ServerInfo;
+}
+
 export interface AssistantAnswer {
   question: string;
   answer: string;

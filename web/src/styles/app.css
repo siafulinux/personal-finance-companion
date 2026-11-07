@@ -812,6 +812,37 @@ textarea {
   flex: none;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.checkbox-row input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.copy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+}
+
+.copy-row:last-child {
+  border-bottom: 0;
+}
+
+.copy-row .mono {
+  overflow-wrap: anywhere;
+}
+
 .form-error {
   background: var(--danger-soft);
   color: var(--danger);
