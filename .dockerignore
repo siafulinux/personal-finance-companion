@@ -1,0 +1,41 @@
+# Never send these into a build context: they are either large, rebuildable or
+# secret. The Dockerfiles copy only what they need.
+.git
+.gitignore
+.github
+.pids
+.cloud-attachments
+.tools
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+
+# Node
+**/node_modules
+web/dist
+
+# Application data, backups, certificates, logs
+data
+database
+backups
+logs
+certs
+artifacts
+
+# Not needed to build the two images
+android
+docs
+samples
+screenshots

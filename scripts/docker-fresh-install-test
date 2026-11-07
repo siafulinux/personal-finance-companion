@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Fresh-install proof for the Docker deployment.
+#
+# Runs a second, fully isolated stack (own project name, volumes, ports and .env)
+# and walks the first-run path: a stranger cannot register before setup, the owner
+# claims it once, the wizard cannot be replayed, a pairing code works once, and
+# registration stays closed afterwards.
+#
+#   scripts/docker-fresh-install-test            # run, then remove the stack
+#   KEEP=1 scripts/docker-fresh-install-test     # leave it running for poking
+#
+# It never touches the primary deployment or the host finance database.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEPLOY="$ROOT/deploy/docker"
+PROJECT="${PROJECT:-pfc-fresh}"
+HTTP_PORT="${HTTP_PORT:-8099}"
+HTTPS_PORT="${HTTPS_PORT:-8499}"
+WORK="$(mktemp -d)"
+ENV_FILE="$WORK/.env"
+BASE="http://127.0.0.1:$HTTP_PORT/api/v1"
+ADMIN_EMAIL="owner-$(date +%s)@example.com"
+ADMIN_PASSWORD="fresh-install-pass-1"
+RESULTS="$WORK/results.log"
+
+cleanup() {
+  if [[ "${KEEP:-0}" == "1" ]]; then
+    echo "Leaving $PROJECT running on :$HTTP_PORT (env: $ENV_FILE)"
+    return
+  fi
+  echo "==> removing the throwaway stack and its volumes"
+  docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" \
+    -f "$DEPLOY/compose.yaml" down -v >/dev/null 2>&1 || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+# --- credentials for this throwaway install (never reused elsewhere) ----------
+cat > "$ENV_FILE" <<EOF
+POSTGRES_PASSWORD=$(openssl rand -base64 24)
+SECRET_KEY=$(openssl rand -base64 48)
+POSTGRES_USER=finance
+POSTGRES_DB=finance
+APP_TIMEZONE=UTC
+# lan = plain HTTP on a trusted network; production would demand COOKIE_SECURE=true.
+ENVIRONMENT=lan
+COOKIE_SECURE=false
+PFC_HTTP_PORT=$HTTP_PORT
+PFC_HTTPS_PORT=$HTTPS_PORT
+PFC_SITE_ADDRESS=:80
+PUBLIC_BASE_URL=
+TRUSTED_HOSTS=*
+ACCESS_TOKEN_TTL_MINUTES=720
+LOG_LEVEL=INFO
+COMPOSE_PROJECT_NAME=$PROJECT
+WORKER_SYNC_INTERVAL_SECONDS=900
+PFC_IMAGE_TAG=2.0.0
+EOF
+
+echo "==> starting an isolated stack ($PROJECT) on :$HTTP_PORT"
+docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" \
+  -f "$DEPLOY/compose.yaml" up -d >"$WORK/up.log" 2>&1
+echo "   logs: $WORK/up.log"
+
+echo "==> waiting for a healthy API"
+for _ in $(seq 1 60); do
+  if curl -fsS "$BASE/server/info" -o "$WORK/info.json" 2>/dev/null; then break; fi
+  sleep 2
+done
+[[ -s "$WORK/info.json" ]] || { echo "FAIL: API never answered"; tail -30 "$WORK/up.log"; exit 1; }
+
+check() { # name expected actual
+  if [[ "$3" == "$2" ]]; then
+    echo "PASS  $1 ($3)"
+  else
+    echo "FAIL  $1 (expected $2, got $3)"
+    exit 1
+  fi
+}
+
+json() { python3 -c "import json,sys;d=json.load(open('$1'));print($2)"; }
+
+code() { # method path body [extra curl args]
+  local method="$1" path="$2" body="${3:-}" ; shift 3 || true
+  curl -sS -o "$WORK/last.json" -w '%{http_code}' -X "$method" "$BASE$path" \
+    -H 'Content-Type: application/json' "$@" ${body:+-d "$body"}
+}
+
+echo
+echo "--- 1. a stranger cannot claim the installation before setup ---"
+check "registration refused before setup" 403 "$(code POST /auth/register \
+  '{"email":"squatter@example.com","password":"squatter-pass-1","display_name":"Squatter","timezone":"UTC"}')"
+check "server reports setup_required" "True" "$(json "$WORK/info.json" "d['setup_required']")"
+check "public info leaks no secret" "True" \
+  "$(json "$WORK/info.json" "str(not any(k in json.dumps(d).lower() for k in ('password','secret_key','postgres')))")"
+
+echo
+echo "--- 2. the owner completes first-run setup ---"
+SETUP_BODY=$(python3 - <<PY
+import json
+print(json.dumps({
+  "server_name": "Fresh Install Test",
+  "admin_email": "$ADMIN_EMAIL",
+  "admin_name": "Owner",
+  "admin_password": "$ADMIN_PASSWORD",
+  "registration_enabled": False,
+}))
+PY
+)
+check "setup accepted" 201 "$(code POST /server/setup "$SETUP_BODY")"
+cp "$WORK/last.json" "$WORK/setup.json"
+TOKEN=$(json "$WORK/setup.json" "d['access_token']")
+check "wizard signs the owner in" "True" "$([[ -n "$TOKEN" ]] && echo True || echo False)"
+check "server name applied" "Fresh Install Test" "$(json "$WORK/setup.json" "d['server']['server_name']")"
+check "web url is the address the client used" "True" \
+  "$(python3 -c "import json;d=json.load(open('$WORK/setup.json'));print(str(d['server']['web_url']).startswith('http://127.0.0.1:') or str(d['server']['web_url']).startswith('http://localhost'))")"
+
+echo
+echo "--- 3. setup cannot be replayed ---"
+check "second setup refused" 409 "$(code POST /server/setup "$SETUP_BODY")"
+check "setup_required now false" "False" "$(curl -sS "$BASE/server/info" | python3 -c 'import json,sys;print(json.load(sys.stdin)["setup_required"])')"
+
+echo
+echo "--- 4. registration policy follows the wizard ---"
+check "register refused after setup" 403 "$(code POST /auth/register \
+  '{"email":"late@example.com","password":"late-pass-123","display_name":"Late","timezone":"UTC"}')"
+
+echo
+echo "--- 5. only the owner administers the install ---"
+check "owner is admin" "True" "$(curl -sS "$BASE/server/settings" -H "Authorization: Bearer $TOKEN" \
+  | python3 -c 'import json,sys;print(json.load(sys.stdin)["settings"]["is_admin"])')"
+check "settings require a session" 401 "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/server/settings")"
+
+echo
+echo "--- 6. pairing is single-use ---"
+check "pairing code minted" 201 "$(code POST /server/pairing '{"label":"fresh test"}' -H "Authorization: Bearer $TOKEN")"
+PAIR=$(json "$WORK/last.json" "d['token']")
+check "code is short-lived" 10 "$(json "$WORK/last.json" "d['ttl_minutes']")"
+check "first redemption works" 200 "$(code POST /server/pair "{\"token\":\"$PAIR\"}")"
+check "code carries no credential" "True" \
+  "$(json "$WORK/last.json" "str('access_token' not in json.dumps(d))")"
+check "second redemption refused" 409 "$(code POST /server/pair "{\"token\":\"$PAIR\"}")"
+
+echo
+echo "--- 7. the owner can then connect a client ---"
+check "login with the owner account" 200 "$(code POST /auth/login \
+  "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")"
+cp "$WORK/last.json" "$WORK/login.json"
+USER_TOKEN=$(json "$WORK/login.json" "d['access_token']")
+check "authenticated request works" 200 "$(curl -sS -o /dev/null -w '%{http_code}' \
+  "$BASE/dashboard" -H "Authorization: Bearer $USER_TOKEN")"
+
+echo
+echo "--- 8. the throwaway database is independent ---"
+check "only the owner exists" "1" "$(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" \
+  -f "$DEPLOY/compose.yaml" exec -T db psql -U finance -d finance -tAc 'select count(*) from users')"
+
+echo
+echo "PASSED: fresh install verified end to end (stack: $PROJECT on :$HTTP_PORT)"

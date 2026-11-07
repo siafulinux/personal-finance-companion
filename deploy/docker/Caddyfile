@@ -1,0 +1,41 @@
+# Reverse proxy for the self-hosted deployment.
+#
+#   PFC_SITE_ADDRESS=:80                  trusted LAN over HTTP  (default)
+#   PFC_SITE_ADDRESS=finance.example.com  public HTTPS, automatic certificate
+#   PFC_SITE_ADDRESS=https://pfc.lan      HTTPS with Caddy's internal CA (LAN)
+#
+# Ports inside the container are always 80/443; the host ports are chosen in
+# compose (.env: PFC_HTTP_PORT / PFC_HTTPS_PORT).
+{
+	# Admin API stays on the container loopback: the health check uses it and
+	# nothing outside the container can reach it.
+	admin 127.0.0.1:2019
+}
+
+{$PFC_SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Only meaningful over TLS; harmless on a LAN where HSTS is ignored.
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# One origin serves both the app and its API, so the browser needs no CORS
+	# exception and cookies stay first-party.
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

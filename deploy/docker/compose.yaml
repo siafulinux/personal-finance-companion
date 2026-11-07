@@ -1,0 +1,186 @@
+# Personal Finance Companion — self-hosted deployment
+#
+#   cp .env.example .env      # then set POSTGRES_PASSWORD and SECRET_KEY
+#   docker compose up -d --build
+#
+# Only the reverse proxy publishes ports. PostgreSQL, the API and the worker live
+# on an internal-only network and are never reachable from outside the host.
+name: ${COMPOSE_PROJECT_NAME:-pfc}
+
+x-logging: &default-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-api: &api
+  image: pfc-api:${PFC_IMAGE_TAG:-2.0.0}
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile.api
+  restart: unless-stopped
+  networks:
+    - backend
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  <<: *default-logging
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-finance}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/docker/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-finance}
+      TZ: ${APP_TIMEZONE:-UTC}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # No published port: the database is only reachable from the backend network.
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    <<: *default-logging
+
+  api:
+    <<: *api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Built from the same variables the database container uses, so they can
+      # never drift apart. The host is the compose service name, never localhost.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/docker/.env}@db:5432/${POSTGRES_DB:-finance}
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      ENVIRONMENT: ${ENVIRONMENT:-lan}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/docker/.env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-720}
+      # A fresh install must be claimed through the wizard, not by a stranger.
+      OPEN_REGISTRATION_UNTIL_SETUP: "false"
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      DEFAULT_TIMEZONE: ${APP_TIMEZONE:-UTC}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID:-}
+      PLAID_SECRET: ${PLAID_SECRET:-}
+      PLAID_ENVIRONMENT: ${PLAID_ENVIRONMENT:-sandbox}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  worker:
+    <<: *api
+    depends_on:
+      api:
+        condition: service_healthy
+    # Reuses the API image: same code, different process. Migrations already ran.
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-finance}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/docker/.env}@db:5432/${POSTGRES_DB:-finance}
+      ENVIRONMENT: ${ENVIRONMENT:-lan}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in deploy/docker/.env}
+      PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID:-}
+      PLAID_SECRET: ${PLAID_SECRET:-}
+      PLAID_ENVIRONMENT: ${PLAID_ENVIRONMENT:-sandbox}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RUN_MIGRATIONS: "false"
+      WORKER_SYNC_INTERVAL_SECONDS: ${WORKER_SYNC_INTERVAL_SECONDS:-300}
+    healthcheck:
+      # The worker has no HTTP surface; a live process that finished a pass is
+      # the signal. It writes this marker after every successful loop.
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os,sys,time; sys.exit(0 if time.time()-os.stat('/tmp/pfc-worker-heartbeat').st_mtime < 900 else 1)\"",
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  web:
+    image: pfc-web:${PFC_IMAGE_TAG:-2.0.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    # Static files only: everything reaching this container comes from the proxy.
+    networks:
+      - edge
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    <<: *default-logging
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    # The only published ports in the stack.
+    ports:
+      - "${PFC_HTTP_PORT:-8088}:80"
+      - "${PFC_HTTPS_PORT:-8448}:443"
+    environment:
+      # ":80" = trusted LAN over HTTP. A domain gets an automatic certificate.
+      PFC_SITE_ADDRESS: ${PFC_SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    # Edge to serve the app, backend to reach the API: the proxy is the only
+    # container that touches both halves of the stack.
+    networks:
+      - edge
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    <<: *default-logging
+
+networks:
+  # No service on this network publishes a port, so PostgreSQL and the API are
+  # reachable only from inside the stack (a bridge network, not `internal`, so
+  # the API can still reach a provider over the internet).
+  backend: {}
+  # Only the reverse proxy and the web container share this one.
+  edge: {}
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

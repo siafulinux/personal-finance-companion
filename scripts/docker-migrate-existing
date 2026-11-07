@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Move an existing non-Docker installation's data into a Compose deployment.
+#
+# The Docker stack runs its own PostgreSQL volume, so a host database (the old
+# development cluster, or a bare-metal install) is not visible to it. This copies
+# it across in one verified step instead of asking the operator to improvise:
+#
+#   scripts/docker-migrate-existing
+#
+# Environment:
+#   ENV_FILE           deploy/docker/.env for the target stack (default)
+#   PROJECT            compose project name (default: pfc)
+#   SOURCE_CONTAINER   container running the OLD database (default: pfc-db)
+#   SOURCE_DB/USER     database and role inside it (default: finance)
+#   FORCE=1            allow overwriting a target that already has accounts
+#   KEEP_DUMP=1        keep the intermediate dump next to backups/
+#
+# It refuses to touch a target that already has users unless FORCE=1: silently
+# merging two ledgers is worse than stopping. The dump is written with mode 600,
+# verified to contain table data before use, and removed unless KEEP_DUMP=1.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEPLOY="$ROOT/deploy/docker"
+ENV_FILE="${ENV_FILE:-$DEPLOY/.env}"
+PROJECT="${PROJECT:-pfc}"
+SOURCE_CONTAINER="${SOURCE_CONTAINER:-pfc-db}"
+SOURCE_DB="${SOURCE_DB:-finance}"
+SOURCE_USER="${SOURCE_USER:-finance}"
+FORCE="${FORCE:-0}"
+KEEP_DUMP="${KEEP_DUMP:-0}"
+
+# Keys compared after the copy. A table missing on either side is a real
+# difference, not a reason to skip the check.
+TABLES=(users financial_accounts transactions bills bill_occurrences budgets categories)
+
+[[ -f "$ENV_FILE" ]] || { echo "FATAL: no env file at $ENV_FILE (copy .env.example first)" >&2; exit 1; }
+docker inspect "$SOURCE_CONTAINER" >/dev/null 2>&1 \
+  || { echo "FATAL: source container $SOURCE_CONTAINER is not running" >&2; exit 1; }
+
+COMPOSE=(docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" -f "$DEPLOY/compose.yaml")
+"${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx db \
+  || { echo "FATAL: the target stack ($PROJECT) is not running; start it first" >&2; exit 1; }
+
+DUMP="$(mktemp -t pfc-migrate-XXXXXX.dump)"
+chmod 600 "$DUMP"
+cleanup() {
+  if [[ "$KEEP_DUMP" == "1" && -s "$DUMP" ]]; then
+    mkdir -p "$ROOT/backups"
+    local kept="$ROOT/backups/pre-docker-$(date +%Y%m%d-%H%M%S).dump"
+    mv "$DUMP" "$kept"
+    echo "   kept the dump at $kept"
+  else
+    rm -f "$DUMP"
+  fi
+}
+trap cleanup EXIT
+
+echo "==> dumping $SOURCE_DB from $SOURCE_CONTAINER"
+docker exec "$SOURCE_CONTAINER" pg_dump -U "$SOURCE_USER" -d "$SOURCE_DB" -Fc >"$DUMP"
+
+# A dump that restores to nothing looks exactly like a successful one; count the
+# TABLE DATA entries before trusting it (the same guard `pfc backup` uses).
+DATA_ENTRIES="$(docker exec -i "$SOURCE_CONTAINER" pg_restore --list <"$DUMP" 2>/dev/null \
+  | grep -c 'TABLE DATA' || true)"
+if [[ "${DATA_ENTRIES:-0}" -lt 1 ]]; then
+  echo "FATAL: the dump contains no table data — refusing to migrate an empty database" >&2
+  exit 1
+fi
+echo "   dump OK: $DATA_ENTRIES tables with data, $(du -h "$DUMP" | cut -f1)"
+
+echo "==> checking the target is empty"
+TARGET_USERS="$("${COMPOSE[@]}" exec -T db psql -U "$SOURCE_USER" -d "$SOURCE_DB" -tAc \
+  'select count(*) from users' | tr -d '[:space:]')"
+if [[ "${TARGET_USERS:-0}" != "0" && "$FORCE" != "1" ]]; then
+  cat >&2 <<EOF
+FATAL: the target already holds $TARGET_USERS account(s).
+
+Merging two ledgers is not something this script guesses at. Either
+  - point clients at the existing stack and leave this database alone, or
+  - re-run with FORCE=1 to replace its contents with $SOURCE_DB.
+FORCE=1 deletes the accounts currently in the container.
+EOF
+  exit 1
+fi
+if [[ "${TARGET_USERS:-0}" != "0" ]]; then
+  echo "   FORCE=1: replacing $TARGET_USERS existing account(s)"
+fi
+
+echo "==> restoring into $PROJECT/db"
+# --clean --if-exists replaces objects the restored dump defines; the target is
+# either empty or explicitly being replaced, so nothing else is touched.
+"${COMPOSE[@]}" exec -T db pg_restore -U "$SOURCE_USER" -d "$SOURCE_DB" \
+  --clean --if-exists --no-owner --no-privileges <"$DUMP"
+
+echo "==> bringing the schema to head"
+"${COMPOSE[@]}" exec -T api alembic upgrade head
+
+echo "==> restarting the application processes"
+"${COMPOSE[@]}" restart api worker >/dev/null
+
+echo "==> comparing row counts"
+fail=0
+for table in "${TABLES[@]}"; do
+  src="$(docker exec "$SOURCE_CONTAINER" psql -U "$SOURCE_USER" -d "$SOURCE_DB" -tAc \
+    "select count(*) from $table" | tr -d '[:space:]')"
+  dst="$("${COMPOSE[@]}" exec -T db psql -U "$SOURCE_USER" -d "$SOURCE_DB" -tAc \
+    "select count(*) from $table" | tr -d '[:space:]')"
+  if [[ "$src" == "$dst" ]]; then
+    printf '   %-20s %s = %s\n' "$table" "$src" "$dst"
+  else
+    printf '   %-20s %s != %s  MISMATCH\n' "$table" "$src" "$dst"
+    fail=1
+  fi
+done
+if [[ "$fail" != "0" ]]; then
+  echo "FATAL: row counts differ; do not point clients at this deployment yet" >&2
+  exit 1
+fi
+
+echo
+echo "Migration verified. Next steps:"
+echo "  1. Complete first-run setup is NOT needed — the restored accounts are the owners."
+echo "  2. Sign in at $(grep -E '^PFC_HTTP_PORT=' "$ENV_FILE" | cut -d= -f2 | xargs -r -I{} echo "http://<host>:{}")"
+echo "  3. Keep the old database read-only until you have confirmed the ledger is correct."
