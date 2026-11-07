@@ -149,7 +149,7 @@ The backend CLI exposes the same operations directly: `backend/.venv/bin/pfc --h
 
 ```bash
 cd backend && .venv/bin/python -m pytest -q     # 87 tests, scenarios A-J plus Phase 1.2/1.3 cases
-cd web && npm test                              # 9 component/format tests
+cd web && npm test                              # 23 component/format tests (jsdom)
 cd web && npm run test:e2e                      # 6 browser tests in Chromium (Playwright)
 cd web && npm run typecheck                     # app and e2e TypeScript (also runs in npm run build)
 cd android && ./gradlew :app:testDebugUnitTest  # 31 repository, ViewModel and format tests

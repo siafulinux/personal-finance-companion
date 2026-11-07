@@ -198,6 +198,55 @@ export function ProgressBar({
   );
 }
 
+/**
+ * Controls a dialog may move focus to when it opens. Buttons, checkboxes,
+ * radios, colour pickers and `select` are deliberately absent: focusing one of
+ * those would look like the user had already chosen something they had not.
+ */
+const TEXT_ENTRY_SELECTOR = [
+  "input:not([type])",
+  'input[type="text"]',
+  'input[type="email"]',
+  'input[type="password"]',
+  'input[type="number"]',
+  'input[type="search"]',
+  'input[type="tel"]',
+  'input[type="url"]',
+  'input[type="date"]',
+  'input[type="time"]',
+  'input[type="month"]',
+  'input[type="datetime-local"]',
+  "textarea",
+].join(",");
+
+function firstTextField(dialog: HTMLElement): HTMLElement | null {
+  for (const candidate of Array.from(dialog.querySelectorAll<HTMLElement>(TEXT_ENTRY_SELECTOR))) {
+    if (candidate.hidden || candidate.getAttribute("aria-hidden") === "true") continue;
+    if (candidate.getAttribute("tabindex") === "-1") continue;
+    const control = candidate as HTMLInputElement | HTMLTextAreaElement;
+    if (control.disabled || control.readOnly) continue;
+    return candidate;
+  }
+  return null;
+}
+
+/**
+ * An edit dialog opens with the saved value already in its first field, so
+ * selecting it lets the user type a replacement. An add dialog opens empty and
+ * there is nothing to select, so the caret simply sits in the field. Selection
+ * is best-effort: date, time and number inputs refuse one, and focus alone is
+ * still the right outcome there.
+ */
+function selectExistingValue(field: HTMLElement) {
+  const control = field as HTMLInputElement | HTMLTextAreaElement;
+  if (!control.value) return;
+  try {
+    control.select();
+  } catch {
+    // This input type does not support a selection range.
+  }
+}
+
 export function Modal({
   open,
   title,
@@ -218,20 +267,45 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
+  // Callers pass an inline arrow (`onClose={() => setOpen(false)}`), so the
+  // handler identity changes on every render of the owning page. Holding it in
+  // a ref keeps the effects below independent of that identity: depending on it
+  // made them re-run on every keystroke and yank focus out of the active input.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+
+  // Escape closes the dialog while it is open.
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") closeRef.current();
     };
     document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  // Scroll lock and the initial focus move belong to the open transition only.
+  // A form dialog opens with its first text field focused so the user can type
+  // immediately; a dialog without one (a confirmation) keeps focus on the
+  // container, where Escape works and Enter cannot land on a destructive
+  // button. Never re-focus on later renders: that steals the caret, and in
+  // browsers with type-ahead find sends the next keystroke to the Find bar.
+  useEffect(() => {
+    if (!open) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    dialogRef.current?.focus();
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) {
+      const field = firstTextField(dialog);
+      (field ?? dialog).focus();
+      if (field) selectExistingValue(field);
+    }
     return () => {
-      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = previous;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (
