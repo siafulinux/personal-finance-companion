@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -22,6 +23,7 @@ from app.api import (
     imports,
     insights,
     intelligence,
+    server,
     transactions,
 )
 from app.config import settings
@@ -29,10 +31,20 @@ from app.database.base import SessionLocal
 from app.logging_config import configure_logging
 from app.security.tokens import tokens_match
 from app.services.errors import DomainError
+from app.version import API_VERSION, APP_VERSION
 
 API_PREFIX = "/api/v1"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-CSRF_EXEMPT_PATHS = {f"{API_PREFIX}/auth/login", f"{API_PREFIX}/auth/register"}
+# Unauthenticated entry points that authorize by their own body or token rather
+# than by the session cookie: a first-run setup attempt and a one-time pairing
+# code. Everything else that mutates state must present a CSRF token when it
+# rides on the cookie.
+CSRF_EXEMPT_PATHS = {
+    f"{API_PREFIX}/auth/login",
+    f"{API_PREFIX}/auth/register",
+    f"{API_PREFIX}/server/setup",
+    f"{API_PREFIX}/server/pair",
+}
 
 
 @asynccontextmanager
@@ -45,7 +57,7 @@ def create_app() -> FastAPI:
     settings.validate_runtime()
     app = FastAPI(
         title=settings.app_name,
-        version="1.0.0-phase1",
+        version=APP_VERSION,
         description=(
             "Local-first personal finance API. All endpoints except health and meta "
             "require authentication. Financial arithmetic is deterministic and "
@@ -55,6 +67,12 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",
+    )
+
+    # A LAN install is reached by IP, so the default is permissive; a public
+    # deployment sets TRUSTED_HOSTS to its domain to reject Host-header games.
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=settings.trusted_host_list
     )
 
     app.add_middleware(
@@ -99,11 +117,23 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_request: Request, exc: RequestValidationError):
+        # Pydantic puts the raised exception object in ``ctx.error`` for custom
+        # validators, which is not JSON-serialisable. Keep the parts a client can
+        # act on and drop the rest.
+        errors = [
+            {
+                "loc": [str(part) for part in error.get("loc", ())],
+                "msg": str(error.get("msg", "Invalid value")),
+                "type": str(error.get("type", "value_error")),
+            }
+            for error in exc.errors()
+        ]
         return JSONResponse(
             status_code=422,
-            content={"detail": "Please check the highlighted fields.", "errors": exc.errors()},
+            content={"detail": "Please check the highlighted fields.", "errors": errors},
         )
 
+    app.include_router(server.router, prefix=API_PREFIX)
     app.include_router(auth.router, prefix=API_PREFIX)
     app.include_router(accounts.router, prefix=API_PREFIX)
     app.include_router(categories.router, prefix=API_PREFIX)
@@ -129,7 +159,8 @@ def create_app() -> FastAPI:
 
         return {
             "app_name": settings.app_name,
-            "version": "phase1",
+            "version": APP_VERSION,
+            "api_version": API_VERSION,
             "currency": "USD",
             "account_types": [t.value for t in AccountType],
             "transaction_types": [t.value for t in TransactionType],
@@ -144,7 +175,7 @@ def create_app() -> FastAPI:
             "safe_to_spend_horizon_days": settings.default_safe_to_spend_horizon_days,
             "max_horizon_days": settings.max_safe_to_spend_horizon_days,
             "ai": ai_status(),
-            "phase": 1,
+            "phase": 2,
         }
 
     return app

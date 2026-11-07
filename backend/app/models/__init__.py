@@ -12,6 +12,7 @@ from app.models.connectivity import (
     SyncRun,
 )
 from app.models.import_job import ImportRecord, TransactionImport
+from app.models.server import PairingToken, ServerSettings
 from app.models.transaction import Transaction
 from app.models.user import (
     IncomeSource,
@@ -36,11 +37,13 @@ __all__ = [
     "IncomeSource",
     "MerchantAlias",
     "NotificationPreference",
+    "PairingToken",
     "PlannedReserve",
     "ProviderLink",
     "ProviderLinkSecret",
     "RecurringSeries",
     "RevokedToken",
+    "ServerSettings",
     "SyncRun",
     "Transaction",
     "TransactionImport",

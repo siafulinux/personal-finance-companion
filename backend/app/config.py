@@ -72,12 +72,34 @@ class Settings(BaseSettings):
     # Minimum spacing between scheduled syncs for one link, in minutes.
     sync_min_interval_minutes: int = 60
 
+    # --- Self-hosting / Docker deployment ---
+    # The address clients should use when it differs from the request's own host
+    # (a reverse proxy on a domain, a tunnel, a NAT). Per-install overrides set in
+    # the setup wizard take precedence over this.
+    public_base_url: str | None = None
+    # Until the first-run wizard finishes, may strangers create an account? Local
+    # development leaves this true so tests and seeds can register freely; the
+    # Docker deployment sets it false, so an exposed install cannot be claimed by
+    # whoever finds it first.
+    open_registration_until_setup: bool = True
+    # Comma-separated Host header allowlist. "*" permits any, which a LAN install
+    # reached by IP needs; set an explicit host list on a public domain.
+    trusted_hosts: str = "*"
+
     # --- Phase 2: AI assistant (optional; the app is fully usable without it) ---
     ai_provider: str = "disabled"  # disabled | openai_compatible
     ai_base_url: str = "https://api.openai.com/v1"
     ai_api_key: str | None = None
     ai_model: str = "gpt-4o-mini"
     ai_timeout_seconds: int = 30
+
+    @field_validator("public_base_url", mode="before")
+    @classmethod
+    def _blank_url(cls, value):
+        # Compose passes an empty string when the setting is unused; treat it as unset.
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("database_url")
     @classmethod
@@ -96,6 +118,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        return [h.strip() for h in self.trusted_hosts.split(",") if h.strip()] or ["*"]
 
     @property
     def default_minimum_buffer(self) -> Decimal:

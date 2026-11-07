@@ -1,7 +1,7 @@
 [project]
 name = "finance-companion-backend"
 version = "0.1.0"
-description = "Personal Finance Companion - Phase 1 backend, financial engine and API"
+description = "Personal Finance Companion backend: financial engine, API and sync worker"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi==0.115.6",
@@ -15,16 +15,20 @@ dependencies = [
     "python-multipart==0.0.20",
     "PyJWT==2.10.1",
     "argon2-cffi==23.1.0",
+    # Provider access tokens are encrypted at rest (app/security/secrets.py).
+    "cryptography==46.0.7",
     "typer==0.15.1",
     # Typer 0.15 relies on Click internals removed in Click 8.2+; keep the supported line.
     "click==8.1.8",
     "psycopg-pool==3.2.4",
+    # Runtime dependency, not a test helper: the Plaid adapter and the optional AI
+    # provider both speak HTTP with it. A production `pip install .` needs it.
+    "httpx==0.28.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest==8.3.4",
-    "httpx==0.28.1",
     "pytest-cov==6.0.0",
 ]
 

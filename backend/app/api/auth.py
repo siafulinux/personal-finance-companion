@@ -37,9 +37,11 @@ from app.security.passwords import validate_password_strength
 from app.services.errors import (
     AuthenticationError,
     DomainError,
+    ForbiddenError,
     RateLimitError,
     ValidationError,
 )
+from app.services.server_setup import registration_allowed
 from app.services.sessions import revoke_token
 from app.services.users import (
     update_profile,
@@ -81,6 +83,12 @@ def _rate_limit(key: str) -> None:
 def register(
     payload: RegisterRequest, response: Response, db: Session = Depends(get_db)
 ) -> TokenResponse:
+    # A self-hosted server decides who may create an account. The first-run
+    # wizard is the only way in until its owner opens registration.
+    if not registration_allowed(db):
+        raise ForbiddenError(
+            "Registration is closed on this server. Ask its administrator for an account."
+        )
     try:
         validate_password_strength(payload.password)
     except ValueError as exc:
