@@ -150,8 +150,12 @@ The backend CLI exposes the same operations directly: `backend/.venv/bin/pfc --h
 ```bash
 cd backend && .venv/bin/python -m pytest -q     # 87 tests, scenarios A-J plus Phase 1.2/1.3 cases
 cd web && npm test                              # 9 component/format tests
+cd web && npm run test:e2e                      # 6 browser tests in Chromium (Playwright)
+cd web && npm run typecheck                     # app and e2e TypeScript (also runs in npm run build)
 cd android && ./gradlew :app:testDebugUnitTest  # 31 repository, ViewModel and format tests
 ```
+
+On a first run, `npx playwright install chromium` fetches the browser. The browser suite drives real key events through dialogs, which jsdom cannot reproduce: a selected value is replaced by one key press, an add dialog keeps a collapsed caret, and every character survives React re-rendering per keystroke. It runs against `web/e2e/harness/index.html`, a page that mounts the real `Modal`; nothing from `e2e/` is in the production build. Type errors in the suite fail `npm run build`, not just the test run.
 
 The backend suite runs against a separate `finance_test` database and covers the acceptance scenarios A-J, plus authentication, CSRF, ownership isolation, duplicate detection, session revocation, throttling and edge cases (negative Safe-to-Spend, stale balances, ambiguous matches).
 

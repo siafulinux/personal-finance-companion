@@ -1,0 +1,8 @@
+{
+  "//": "Type checking for the browser-level tests. Separate from tsconfig.json because e2e/ runs in Node (the Playwright config reads process.env) and is never part of the application bundle. `npm run build` type checks both, so a broken spec fails the build rather than the test run.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

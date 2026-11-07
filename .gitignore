@@ -24,6 +24,11 @@ web/dist/
 web/.vite/
 *.tsbuildinfo
 
+# Playwright (browser-level tests): traces, screenshots and failure contexts
+web/test-results/
+web/playwright-report/
+web/.playwright/
+
 # Android / Gradle
 android/.gradle/
 android/.kotlin/
