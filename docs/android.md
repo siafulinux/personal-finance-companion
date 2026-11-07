@@ -133,14 +133,13 @@ cd android
 ./gradlew :app:assembleDebugAndroidTest
 ```
 
-If the system JDK is broken or newer than 17, point `JAVA_HOME` at a JDK 17 — Gradle 8.11.1
-fails on JDK 25 with a bare `25.0.5` error. This
-workspace uses a project-local JDK and Gradle under `.tools/` (gitignored):
-
-```bash
-JAVA_HOME=../.tools/jdk17 PATH=../.tools/jdk17/bin:$PATH \
-  ../.tools/gradle-8.11.1/bin/gradle :app:assembleDebug
-```
+No `JAVA_HOME` is needed. `gradle/gradle-daemon-jvm.properties` pins the build daemon to a
+JDK 17 toolchain (any vendor), so the wrapper builds even when the host's default `java` is
+newer — Gradle 8.11.1 refuses to run a build on JDK 25, and AGP 8.10 targets 17. The launcher
+JVM is only a bootstrap: it starts the daemon and hands over, so `java -version` showing 25 is
+fine, and a `JAVA_HOME` pointed at another version does not override the pin. The build
+machine still needs a JDK 17 installed (`apt install openjdk-17-jdk`); to change the pin later,
+regenerate the file with `./gradlew updateDaemonJvm --jvm-version=17`.
 
 ## Installing on a physical device
 

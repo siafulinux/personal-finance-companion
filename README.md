@@ -175,7 +175,7 @@ The app is a full participant in the ledger, not a read-only companion:
 
 - The default API address is `https://10.0.2.2:8443/api/v1/` (the host machine from an emulator, through the TLS front). For a physical device, open **Settings → Server address** and enter your machine's LAN URL.
 - HTTPS is required outside loopback and the project CA is bundled in the APK; certificate verification is never disabled. The bearer token is encrypted with an Android Keystore key, and signing out revokes it server-side.
-- If your system JDK is broken or older than 17, run Gradle with a JDK 17: `JAVA_HOME=/path/to/jdk-17 ./gradlew ...`.
+- The Android build pins Gradle's daemon to JDK 17 (`android/gradle/gradle-daemon-jvm.properties`), so `./gradlew` works even when the host's default JDK is newer; no `JAVA_HOME` needed.
 - See [docs/android.md](docs/android.md) for the form rules, import workflow and security notes.
 
 ## Configuration
