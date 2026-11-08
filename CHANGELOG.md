@@ -8,6 +8,48 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.3.2] — 2026-11-08 — Android release, tag `v0.3.2-android`
+
+An Android-only release: `versionName` `0.3.2`, `versionCode` 5, application id
+`com.pfc.companion`. The server (`APP_VERSION` `2.0.0`) and web app are unchanged by it.
+
+### Fixed
+
+- **A stored server address can no longer 404 a healthy server.** The app builds every
+  request by appending to the stored address, so a value that already carried part of the API
+  path asked the wrong URL — `/api` became `/api/api/v1/auth/me` (404), and a bare origin
+  without `/api/v1` asked `/auth/me`, got the web app's HTML with a 200 and surfaced as a
+  parse error. `ServerUrl.apiBaseFromStored` now strips a whole or partial API path
+  (`/api/v1`, `/api`, `/v1`, repeated) before appending the canonical one, and the Settings
+  field shows the origin instead of a value the same form would reject. Storage is deliberately
+  not rewritten: the bearer token is keyed by the stored address, so rewriting that key would
+  sign the user out. A 404 now says the server is reachable but has no API at that address,
+  and a 200 that is not JSON says the address may point at the web app.
+- **`.gitignore` no longer hides the app's data layer.** The rule meant for the repository's
+  own data directory was unanchored and also matched
+  `android/app/src/main/java/com/pfc/companion/data`, so twelve sources and four test classes
+  were never tracked. The rule is anchored, and those files enter the repository here.
+
+### Changed
+
+- **Android `0.3.0` → `0.3.2`.** `0.3.1` (repairing an address with no `/api/v1`) existed only
+  in the version comment and was folded into `0.3.2`, so no build was ever labelled `0.3.1`.
+- **Exported APK** `personal-finance-companion-0.3.2-debug.apk`, replacing the `0.3.0` copy in
+  `/opt/lampp/htdocs/downloads`. It is byte-identical to
+  `android/app/build/outputs/apk/debug/app-debug.apk` (MD5 `48cf378f…`), whose
+  `output-metadata.json` records `versionCode` 5 / `versionName` `0.3.2`.
+- `docs/android.md` states the shipped version and installation path, and documents the
+  `Request failed (404)` troubleshooting the canonicalisation comes from.
+
+### Verified
+
+- Emulator, with a deliberately broken address injected: the previous build blocked sign-in
+  with its own path validation, `0.3.2` signed in and loaded the dashboard from the server,
+  kept the session across a cold restart, and ended with a canonical stored address.
+- **61 Android unit tests pass**, 17 of them in `ServerUrlTest`; `assembleDebug` succeeds.
+
+---
+
 ## [Unreleased] — Phase 2: Dockerised self-hosted deployment
 
 ### Added
