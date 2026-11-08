@@ -11,12 +11,24 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.user import RevokedToken
-from app.security.tokens import TokenError, decode_token
+from app.security.tokens import TokenClaims, TokenError, decode_token
 from app.utils.dates import utc_now
 
 
 def is_revoked(db: Session, jti: str) -> bool:
     return db.execute(select(RevokedToken.jti).where(RevokedToken.jti == jti)).first() is not None
+
+
+def session_superseded(claims: TokenClaims, current_version: int) -> bool:
+    """True when the token belongs to an earlier generation of the account.
+
+    Every token carries the account's ``token_version`` at the moment it was
+    minted, and a password change increments it. Comparing integers revokes all
+    existing sessions exactly, with no timestamp granularity to argue about: two
+    tokens minted in the same second are still told apart, which a timestamp could
+    not do without letting one of them survive the change.
+    """
+    return claims.version != current_version
 
 
 def revoke_token(db: Session, token: str) -> bool:

@@ -150,6 +150,10 @@ export const api = {
     login: (body: { email: string; password: string }) =>
       request<{ access_token: string }>("/auth/login", { method: "POST", body: json(body) }),
     logout: () => request<{ message: string }>("/auth/logout", { method: "POST" }),
+    // Changing the password ends every other session; this browser is signed back
+    // in by the new cookie the response sets.
+    changePassword: (body: { current_password: string; new_password: string }) =>
+      request<{ access_token: string }>("/auth/password", { method: "POST", body: json(body) }),
     me: () => request<Profile>("/auth/me"),
     onboarding: (body: unknown) =>
       request<Profile>("/auth/onboarding", { method: "POST", body: json(body) }),

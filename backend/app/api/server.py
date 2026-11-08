@@ -85,7 +85,7 @@ def run_setup(
     user = complete_setup(db, payload)
     # Sign the new administrator in, so the wizard ends inside the app rather
     # than bouncing them to a login form they have just filled in.
-    token, csrf = set_session_cookies(response, user.id)
+    token, csrf = set_session_cookies(response, user.id, user.token_version)
     return {
         "server": server_info(db, request),
         "user": {

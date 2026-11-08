@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
 import { useTheme, type ThemeChoice } from "../context/ThemeContext";
 import { api } from "../lib/api";
+import { PasswordForm } from "../components/PasswordForm";
 import { formatMoney } from "../lib/format";
 import type { Category, IncomeSource } from "../lib/types";
 import {
@@ -263,6 +264,22 @@ export function SettingsPage() {
           </div>
         </Card>
       </div>
+
+      <Card>
+        <h2 style={{ fontSize: "1.05rem", marginBottom: "0.3rem" }}>Password</h2>
+        <p className="small muted" style={{ marginBottom: "0.9rem" }}>
+          Changing your password signs out every other device that is signed in. This browser
+          stays signed in.
+        </p>
+        <PasswordForm
+          onSubmit={async (currentPassword, newPassword) => {
+            await api.auth.changePassword({
+              current_password: currentPassword,
+              new_password: newPassword,
+            });
+          }}
+        />
+      </Card>
 
       <Card>
         <h2 style={{ fontSize: "1.05rem", marginBottom: "0.3rem" }}>Safe-to-Spend rules</h2>

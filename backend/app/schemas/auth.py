@@ -35,6 +35,17 @@ class LoginRequest(APIModel):
     password: str = Field(min_length=1, max_length=256)
 
 
+class ChangePasswordRequest(APIModel):
+    """A password change, confirmed with the password that is in use now.
+
+    There is no ``confirm_password`` field: matching the two new entries is a form
+    concern, and a second copy of a secret in the payload buys nothing.
+    """
+
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

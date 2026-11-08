@@ -39,6 +39,10 @@ class User(Base, UUIDPrimaryKey, TimestampMixin):
     is_demo: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Bumped on every password change. Access tokens carry the version they were
+    # minted with, so a bump ends every session in existence without needing to
+    # know its identifier - and without depending on clock granularity.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     preferences: Mapped["UserPreference"] = relationship(

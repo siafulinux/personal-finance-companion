@@ -44,6 +44,32 @@ class FinanceRepository(
         session.clearToken()
     }
 
+    /**
+     * Changes the password and keeps this device signed in.
+     *
+     * The server ends every other session and hands back a token for this one, so
+     * the new token replaces the old instead of signing the user out here.
+     */
+    suspend fun changePassword(currentPassword: String, newPassword: String) {
+        val response = try {
+            api.post(
+                "auth/password",
+                ChangePasswordRequest(currentPassword, newPassword),
+                ChangePasswordRequest.serializer(),
+                TokenResponse.serializer(),
+            )
+        } catch (err: ApiException) {
+            // Every other request treats 401 as an expired session, which is right
+            // everywhere except here: the session is fine, the current password is
+            // not. Say what the user can act on.
+            if (err.status == 401) {
+                throw ApiException(401, "Current password is incorrect.")
+            }
+            throw err
+        }
+        session.saveToken(response.accessToken)
+    }
+
     suspend fun profile(): Profile = api.get("auth/me", Profile.serializer())
 
     suspend fun completeOnboarding(

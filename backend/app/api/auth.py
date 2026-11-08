@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections import defaultdict, deque
@@ -14,6 +15,7 @@ from app.config import settings
 from app.database.base import get_db
 from app.models import User
 from app.schemas.auth import (
+    ChangePasswordRequest,
     ProfileUpdate,
     DataExportOut,
     DeleteAccountRequest,
@@ -47,6 +49,7 @@ from app.services.users import (
     update_profile,
     add_income_source,
     authenticate,
+    change_password,
     delete_income_source,
     delete_user_account,
     complete_onboarding,
@@ -62,6 +65,7 @@ from app.services.users import (
 )
 
 router = APIRouter(tags=["auth"])
+logger = logging.getLogger("pfc.auth")
 
 # Simple per-process brute-force guard. Documented as best-effort in SECURITY.md.
 _attempts: dict[str, deque[float]] = defaultdict(deque)
@@ -101,7 +105,7 @@ def register(
         timezone=payload.timezone,
         currency=payload.currency,
     )
-    token, csrf = set_session_cookies(response, user.id)
+    token, csrf = set_session_cookies(response, user.id, user.token_version)
     return TokenResponse(
         access_token=token,
         expires_in=settings.access_token_ttl_minutes * 60,
@@ -116,7 +120,7 @@ def login(
     client = request.client.host if request.client else "unknown"
     _rate_limit(f"{client}:{payload.email.lower()}")
     user = authenticate(db, payload.email, payload.password)
-    token, csrf = set_session_cookies(response, user.id)
+    token, csrf = set_session_cookies(response, user.id, user.token_version)
     return TokenResponse(
         access_token=token,
         expires_in=settings.access_token_ttl_minutes * 60,
@@ -135,6 +139,43 @@ def logout(
         revoke_token(db, token)
     clear_session_cookies(response)
     return Message(message="Signed out.")
+
+
+@router.post("/auth/password", response_model=TokenResponse)
+def set_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TokenResponse:
+    """Change the password, ending every session that used the old one.
+
+    The device that performs the change is signed straight back in with a new token:
+    a password change is a security action, not a request to be thrown out of the
+    app being used. Every other session fails on its next request because its token
+    carries the account's previous ``token_version``.
+    """
+    # A stolen session could otherwise use this endpoint to guess the password.
+    _rate_limit(f"password:{user.id}")
+    presented = token_from_request(request)
+    change_password(
+        db,
+        user,
+        current_password=payload.current_password,
+        new_password=payload.new_password,
+    )
+    # The version bump above already invalidates it; recording its identifier as
+    # well means the token stays dead even if the account's version is ever reset.
+    if presented:
+        revoke_token(db, presented)
+    token, csrf = set_session_cookies(response, user.id, user.token_version)
+    logger.info("auth.password_changed user=%s", user.id)
+    return TokenResponse(
+        access_token=token,
+        expires_in=settings.access_token_ttl_minutes * 60,
+        csrf_token=csrf,
+    )
 
 
 @router.get("/auth/me", response_model=ProfileOut)

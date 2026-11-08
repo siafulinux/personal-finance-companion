@@ -11,6 +11,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/**
+ * The password form's progress. [saved] means the server accepted the change and
+ * every other device was signed out; [error] is a message shown as it came back.
+ */
+data class PasswordFormState(
+    val busy: Boolean = false,
+    val error: String? = null,
+    val saved: Boolean = false,
+)
+
 class SettingsViewModel(private val repository: FinanceRepository) : ViewModel() {
     private val _profile = MutableStateFlow<UiState<Profile>>(UiState.Loading)
     val profile: StateFlow<UiState<Profile>> = _profile.asStateFlow()
@@ -41,6 +51,41 @@ class SettingsViewModel(private val repository: FinanceRepository) : ViewModel()
                 .onSuccess { _profile.value = UiState.Ready(it) }
                 .onFailure { _profile.value = UiState.Failed(it.message ?: "Could not load your profile.") }
         }
+    }
+
+    private val _password = MutableStateFlow(PasswordFormState())
+    val password: StateFlow<PasswordFormState> = _password.asStateFlow()
+
+    /**
+     * Checks only what a form can know — that both new entries are present and
+     * equal. Whether the current password is right, and whether the new one meets
+     * policy, is the server's answer and is shown unchanged.
+     */
+    fun changePassword(current: String, newPassword: String, confirm: String) {
+        if (_password.value.busy) return
+        if (current.isBlank() || newPassword.isBlank()) {
+            _password.value = PasswordFormState(error = "Enter your current and new password.")
+            return
+        }
+        if (newPassword != confirm) {
+            _password.value = PasswordFormState(error = "The new passwords do not match.")
+            return
+        }
+        _password.value = PasswordFormState(busy = true)
+        viewModelScope.launch {
+            runCatching { repository.changePassword(current, newPassword) }
+                .onSuccess { _password.value = PasswordFormState(saved = true) }
+                .onFailure {
+                    _password.value = PasswordFormState(
+                        error = it.message ?: "Unable to change your password.",
+                    )
+                }
+        }
+    }
+
+    /** A message belongs to the attempt that produced it, not to the next edit. */
+    fun clearPasswordMessage() {
+        if (!_password.value.busy) _password.value = PasswordFormState()
     }
 
     fun setTheme(value: String) {

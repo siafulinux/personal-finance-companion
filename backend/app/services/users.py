@@ -116,6 +116,30 @@ def authenticate(db: Session, email: str, password: str) -> User:
     return user
 
 
+def change_password(
+    db: Session, user: User, *, current_password: str, new_password: str
+) -> None:
+    """Set a new password after confirming the one in use.
+
+    The change bumps ``token_version``, which invalidates every access token issued
+    earlier — the caller reissues one for the device that performed the change, so
+    that device stays signed in and every other one does not.
+    """
+    if not verify_password(current_password, user.password_hash):
+        raise AuthenticationError("Current password is incorrect.")
+    try:
+        validate_password_strength(new_password)
+    except ValueError as exc:
+        # The policy raises a plain ValueError; API callers expect a domain error so
+        # the reason reaches the user instead of becoming a 500.
+        raise ValidationError(str(exc)) from exc
+    if verify_password(new_password, user.password_hash):
+        raise ValidationError("Choose a password different from the current one.")
+    user.password_hash = hash_password(new_password)
+    user.token_version = (user.token_version or 0) + 1
+    db.flush()
+
+
 def update_profile(db: Session, user: User, *, display_name: str | None, timezone: str | None) -> User:
     if display_name is not None:
         user.display_name = display_name.strip()

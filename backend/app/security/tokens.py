@@ -20,7 +20,9 @@ class TokenError(Exception):
     """Raised when a token is missing, malformed or expired."""
 
 
-def create_access_token(user_id: uuid.UUID, *, expires_minutes: int | None = None) -> str:
+def create_access_token(
+    user_id: uuid.UUID, *, expires_minutes: int | None = None, token_version: int = 0
+) -> str:
     ttl = expires_minutes or settings.access_token_ttl_minutes
     now = utc_now()
     payload: dict[str, Any] = {
@@ -29,6 +31,9 @@ def create_access_token(user_id: uuid.UUID, *, expires_minutes: int | None = Non
         "exp": int((now + timedelta(minutes=ttl)).timestamp()),
         "type": "access",
         "jti": secrets.token_urlsafe(8),
+        # Bumped whenever every session must end (a password change). A token
+        # carrying an older value is refused, even within the same second.
+        "ver": token_version,
     }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
@@ -40,6 +45,7 @@ class TokenClaims:
     user_id: uuid.UUID
     jti: str
     expires_at: datetime
+    version: int
 
 
 def decode_token(token: str) -> TokenClaims:
@@ -62,7 +68,15 @@ def decode_token(token: str) -> TokenClaims:
     if not jti:
         raise TokenError("Token is missing an identifier.")
     expires_at = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
-    return TokenClaims(user_id=user_id, jti=str(jti), expires_at=expires_at)
+    # Tokens minted before the version claim existed carry no version; they belong
+    # to the initial generation, which is the column's default.
+    try:
+        version = int(payload.get("ver", 0))
+    except (TypeError, ValueError) as exc:
+        raise TokenError("Token version is invalid.") from exc
+    return TokenClaims(
+        user_id=user_id, jti=str(jti), expires_at=expires_at, version=version
+    )
 
 
 def decode_access_token(token: str) -> uuid.UUID:

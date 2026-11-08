@@ -12,7 +12,7 @@ from app.database.base import get_db
 from app.models import User
 from app.security.tokens import TokenError, decode_token
 from app.services.errors import AuthenticationError
-from app.services.sessions import is_revoked
+from app.services.sessions import is_revoked, session_superseded
 from app.services.users import get_user
 
 
@@ -45,6 +45,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = get_user(db, user_id)
     if user is None:
         raise AuthenticationError("This account is no longer available.")
+    if session_superseded(claims, user.token_version):
+        raise AuthenticationError("Your password changed. Please sign in again.")
     request.state.auth_source = source
     request.state.user_id = str(user.id)
     return user

@@ -7,6 +7,7 @@ Base URL: `http://127.0.0.1:8010/api/v1` (or your configured host/port). Interac
 - `POST /auth/register` — `{email, password, display_name, timezone?, currency?}` → `{access_token, token_type, expires_in}` and session cookies.
 - `POST /auth/login` — `{email, password}` → same token response.
 - `POST /auth/logout` — clears cookies.
+- `POST /auth/password` — `{current_password, new_password}` → a fresh token response. The current password must be correct (otherwise `401`) and the new one must satisfy the policy (`422`); it must also differ from the current one. The change bumps the account's token version, so **every other session is refused from its next request**, while this device is signed back in with the returned token and refreshed cookies.
 - `GET /auth/me` — profile, preferences and notification preferences.
 - `PATCH /auth/profile`, `PATCH /auth/preferences`, `PATCH /auth/notification-preferences`
 - `POST /auth/onboarding` — guided first-run setup.
