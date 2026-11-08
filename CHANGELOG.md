@@ -8,6 +8,30 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.4.0] — 2026-11-08 — Change-password release
+
+`versionName` `0.4.0`, `versionCode` 6, application id `com.pfc.companion`. A minor bump
+rather than a patch because the release adds a capability users act on, not only repairs.
+The server (`APP_VERSION` `2.0.0`) is unchanged.
+
+### Added
+
+- **A signed-in user can change their own password.** `POST /api/v1/auth/password` requires
+  the current password, applies the same strength policy as registration, and refuses a new
+  password identical to the old one. The change increments the account's `token_version`, so
+  every token minted earlier stops verifying — other devices are signed out exactly, without
+  timestamp granularity. The endpoint returns a fresh token for the device that made the
+  change, so that one stays signed in. Exposed as **Settings → Change password** on the web
+  and on Android, with field-level errors for a wrong current password and a weak or unchanged
+  new one.
+
+### Changed
+
+- **Exported APK** `personal-finance-companion-0.4.0-debug.apk`, replacing the `0.3.2` copy in
+  `/opt/lampp/htdocs/downloads`.
+
+---
+
 ## [0.3.2] — 2026-11-08 — Android release, tag `v0.3.2-android`
 
 An Android-only release: `versionName` `0.3.2`, `versionCode` 5, application id

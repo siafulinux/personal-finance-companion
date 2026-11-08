@@ -20,8 +20,10 @@ android {
         // 0.3.2: so is an address holding only part of that path (`/api`, `/v1`),
         // and the address field shows the origin instead of a value the same form
         // would reject.
-        versionCode = 5
-        versionName = "0.3.2"
+        // 0.4.0: Settings can change the account password after confirming the
+        // current one; the change signs out every other device.
+        versionCode = 6
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
