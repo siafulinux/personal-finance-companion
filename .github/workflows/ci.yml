@@ -1,0 +1,107 @@
+name: CI
+
+# Every push, on any branch. Pull requests are checked too, so a branch is
+# verified before it is merged rather than only after.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push supersedes the run for the same ref; the old one has nothing to add.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # The test fixtures create their own `finance_test` database and run
+        # migrations into it; they only need a reachable server and the matching
+        # credentials below.
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: finance
+          POSTGRES_PASSWORD: finance_dev_password
+          POSTGRES_DB: finance
+        ports:
+          # The fixtures default to 55432, the port the local container uses, so
+          # CI exercises the same configuration as a developer machine.
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U finance -d finance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "55432"
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: finance_dev_password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install into backend/.venv
+        working-directory: backend
+        # The fixtures invoke `backend/.venv/bin/alembic` by path, so the virtualenv
+        # has to exist in exactly that place — a bare `pip install` would not do.
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+      - name: Run tests
+        working-directory: backend
+        run: .venv/bin/python -m pytest
+
+  web:
+    name: Web typecheck and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck the app and the Playwright harness
+        # `typecheck` runs both projects (tsconfig.json and tsconfig.e2e.json), so a
+        # type error in a spec fails the build, not just in application code.
+        run: npm run typecheck
+      - name: Run tests
+        run: npm test
+
+  android:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # gradle/gradle-daemon-jvm.properties pins the daemon to 17, so the
+          # toolchain Gradle launches must be 17 and not the runner's default JDK.
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run unit tests
+        # compileSdk 36 is on the runner image; AGP installs any missing SDK
+        # component itself because the image already accepts the licences.
+        run: ./gradlew testDebugUnitTest --stacktrace
