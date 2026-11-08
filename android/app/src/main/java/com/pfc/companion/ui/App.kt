@@ -33,6 +33,7 @@ import com.pfc.companion.ServiceLocator
 import com.pfc.companion.data.ApiException
 import com.pfc.companion.data.Profile
 import com.pfc.companion.ui.components.LoadingPane
+import com.pfc.companion.ui.screens.BillFormScreen
 import com.pfc.companion.ui.screens.BillsScreen
 import com.pfc.companion.ui.screens.BudgetsScreen
 import com.pfc.companion.ui.screens.DashboardScreen
@@ -194,8 +195,38 @@ private fun MainShell() {
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable("bills") { BillsScreen() }
-            composable("budgets") { BudgetsScreen() }
+            composable("bills") {
+                BillsScreen(
+                    onAddBill = { navController.navigate("bills/new") },
+                    onEditBill = { id -> navController.navigate("bills/edit/$id") },
+                    flash = flash,
+                    onFlashShown = { flash = null },
+                )
+            }
+            composable("bills/new") {
+                BillFormScreen(
+                    billId = null,
+                    onSaved = { message ->
+                        flash = message
+                        navController.popBackStack("bills", inclusive = false)
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("bills/edit/{billId}") { entry ->
+                val billId = entry.arguments?.getString("billId").orEmpty()
+                BillFormScreen(
+                    billId = billId,
+                    onSaved = { message ->
+                        flash = message
+                        navController.popBackStack("bills", inclusive = false)
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable("budgets") {
+                BudgetsScreen(flash = flash, onFlashShown = { flash = null })
+            }
             composable("shopping") {
                 ShoppingScreen(onBack = { navController.popBackStack() })
             }

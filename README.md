@@ -243,5 +243,5 @@ account, registration policy). Point the Android app at the same address —
 - The Docker deployment serves plain HTTP on a trusted LAN by default; a public HTTPS
   deployment needs a domain and a certificate, and that path is documented but not yet
   verified on this machine.
-- Android has no offline cache; it requires the server. Android onboarding creates one opening account; categories, budgets and bills are still created in the web app, and transaction deletion is web-only.
+- Android has no offline cache; it requires the server. Android onboarding creates one opening account, and the Android app matches the web settings screen: profile, income and payday, Safe-to-Spend rules, notifications, categories, merchant aliases, bills, budgets, data export and account deletion. Transaction deletion is still web-only.
 - Bill reminders and location features are designed for later phases and off by default.

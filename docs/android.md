@@ -223,8 +223,11 @@ reachable but has no API at that address — both point at the address, not at a
   the project CA trusted.
 - Only the emulator was used for end-to-end verification in Phase 1.3; no physical device
   has been tested.
-- Onboarding can create an opening account. Categories, budgets and bills are created and
-  edited in the web app; Android can record, correct and import transactions, mark bills
-  paid and confirm matches.
+- Onboarding can create an opening account. Settings then covers the same ground as the web
+  settings page: display name, timezone, Safe-to-Spend rules, notifications, income sources and
+  their next payday, categories, merchant aliases, and data export or account deletion.
+- Bills can be added, edited and deleted from the Bills tab, and the month's budget is edited
+  from Budgets. The bill's first due date is fixed once it exists, because moving it would
+  rewrite occurrences that were already generated.
 - No transaction deletion in the Android UI (the backend endpoint exists).
 - Single currency (USD), matching the backend's Phase 1 scope.

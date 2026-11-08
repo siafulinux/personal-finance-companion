@@ -1,0 +1,375 @@
+package com.pfc.companion.ui.screens
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pfc.companion.ServiceLocator
+import com.pfc.companion.data.BillDraft
+import com.pfc.companion.ui.components.ErrorPane
+import com.pfc.companion.ui.components.LoadingPane
+import com.pfc.companion.ui.components.PickerField
+import com.pfc.companion.ui.components.rememberScreenViewModel
+import com.pfc.companion.ui.vm.BillFormViewModel
+import com.pfc.companion.util.formatDate
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+
+private val billFrequencies = listOf(
+    "weekly" to "Weekly",
+    "biweekly" to "Every 2 weeks",
+    "monthly" to "Monthly",
+    "every_two_months" to "Every 2 months",
+    "quarterly" to "Quarterly",
+    "semiannual" to "Every 6 months",
+    "annual" to "Yearly",
+    "custom" to "Custom interval",
+)
+
+/**
+ * Adds a bill or edits one. The schedule's first due date is fixed once the bill
+ * exists, because moving it would rewrite occurrences that were already generated.
+ */
+@Composable
+fun BillFormScreen(
+    billId: String?,
+    onSaved: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    val viewModel = rememberScreenViewModel("bill-form-${billId ?: "new"}") {
+        BillFormViewModel(ServiceLocator.repository, billId)
+    }
+    val state by viewModel.state.collectAsStateWithLifecycle()
+
+    if (state.loading) {
+        LoadingPane(if (billId == null) "Preparing the form" else "Loading bill")
+        return
+    }
+
+    if (state.loadFailed) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            ErrorPane(state.error ?: "Could not load this bill.", onRetry = viewModel::load)
+            TextButton(onClick = onBack) { Text("Back to bills") }
+        }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TextButton(onClick = onBack) {
+            Text("← Back", style = MaterialTheme.typography.labelMedium)
+        }
+        BillFormContent(
+            draft = state.draft,
+            accounts = state.accounts,
+            categories = state.categories,
+            editing = billId != null,
+            saving = state.saving,
+            error = state.error,
+            onChange = { viewModel.update { _ -> it } },
+            onSubmit = { viewModel.submit(onSaved) },
+            onDelete = { viewModel.delete(onSaved) },
+            onCancel = onBack,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BillFormContent(
+    draft: BillDraft,
+    accounts: List<com.pfc.companion.data.Account>,
+    categories: List<com.pfc.companion.data.Category>,
+    editing: Boolean,
+    saving: Boolean,
+    error: String?,
+    onChange: (BillDraft) -> Unit,
+    onSubmit: () -> Unit,
+    onDelete: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            if (editing) "Edit bill" else "Add a recurring bill",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Text(
+            "The expected amount drives what Safe-to-Spend reserves. Occurrences are generated by the server from this schedule.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        OutlinedTextField(
+            value = draft.name,
+            onValueChange = { onChange(draft.copy(name = it.take(120))) },
+            label = { Text("Bill name") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = draft.merchant,
+            onValueChange = { onChange(draft.copy(merchant = it.take(160))) },
+            label = { Text("Merchant (optional)") },
+            supportingText = { Text("Used to match payments to this bill.") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = draft.expectedAmount,
+            onValueChange = { value ->
+                if (value.isEmpty() || value.matches(Regex("^\\d{0,9}(\\.\\d{0,2})?$"))) {
+                    onChange(draft.copy(expectedAmount = value))
+                }
+            },
+            label = { Text("Expected amount") },
+            prefix = { Text("$") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = draft.minimumAmount,
+            onValueChange = { value ->
+                if (value.isEmpty() || value.matches(Regex("^\\d{0,9}(\\.\\d{0,2})?$"))) {
+                    onChange(draft.copy(minimumAmount = value))
+                }
+            },
+            label = { Text("Minimum amount (optional)") },
+            supportingText = { Text("Context for variable bills; never exceeds the expected amount.") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = formatDate(draft.anchorDate),
+            onValueChange = {},
+            readOnly = true,
+            enabled = !editing,
+            label = { Text(if (editing) "First due date (fixed)" else "First due date") },
+            supportingText = {
+                Text(
+                    if (editing) {
+                        "The schedule counts from this date, so it does not move once the bill exists."
+                    } else {
+                        "Every later occurrence is counted from here."
+                    }
+                )
+            },
+            trailingIcon = {
+                if (!editing) TextButton(onClick = { showDatePicker = true }) { Text("Change") }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        PickerField(
+            label = "Frequency",
+            selected = billFrequencies.firstOrNull { it.first == draft.frequency }?.second ?: "Monthly",
+            options = billFrequencies,
+            modifier = Modifier.fillMaxWidth(),
+            onSelect = { onChange(draft.copy(frequency = it)) },
+        )
+
+        if (draft.isCustom) {
+            OutlinedTextField(
+                value = draft.customIntervalDays,
+                onValueChange = { value ->
+                    if (value.length <= 3 && value.all(Char::isDigit)) {
+                        onChange(draft.copy(customIntervalDays = value))
+                    }
+                },
+                label = { Text("Custom interval (days)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        PickerField(
+            label = "Payment account",
+            selected = accounts.firstOrNull { it.id == draft.accountId }?.name ?: "Any account",
+            options = listOf("" to "Any account") + accounts.map { it.id to it.name },
+            modifier = Modifier.fillMaxWidth(),
+            onSelect = { onChange(draft.copy(accountId = it)) },
+        )
+
+        PickerField(
+            label = "Category",
+            selected = categories.firstOrNull { it.id == draft.categoryId }?.name ?: "Uncategorized",
+            options = listOf("" to "Uncategorized") + categories.map { it.id to it.name },
+            modifier = Modifier.fillMaxWidth(),
+            onSelect = { onChange(draft.copy(categoryId = it)) },
+        )
+
+        OutlinedTextField(
+            value = draft.notes,
+            onValueChange = { onChange(draft.copy(notes = it.take(2000))) },
+            label = { Text("Notes (optional)") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        ToggleRow(
+            label = "Reserve this bill in Safe-to-Spend",
+            description = "The money is held back until the bill is paid.",
+            checked = draft.reserveInSafeToSpend,
+            onChange = { onChange(draft.copy(reserveInSafeToSpend = it)) },
+        )
+        ToggleRow(
+            label = "Essential",
+            description = "Rent, utilities, insurance — the bills that come first.",
+            checked = draft.isEssential,
+            onChange = { onChange(draft.copy(isEssential = it)) },
+        )
+        if (editing) {
+            ToggleRow(
+                label = "Active",
+                description = "Inactive bills stop generating occurrences and reserves.",
+                checked = draft.isActive,
+                onChange = { onChange(draft.copy(isActive = it)) },
+            )
+        }
+
+        if (error != null) {
+            Text(
+                error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+
+        Button(onClick = onSubmit, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                when {
+                    saving -> "Saving…"
+                    editing -> "Save changes"
+                    else -> "Add bill"
+                }
+            )
+        }
+        OutlinedButton(onClick = onCancel, enabled = !saving, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel")
+        }
+        if (editing) {
+            TextButton(
+                onClick = { confirmDelete = true },
+                enabled = !saving,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Delete this bill", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+
+    if (showDatePicker) {
+        val initial = runCatching { LocalDate.parse(draft.anchorDate) }.getOrDefault(LocalDate.now())
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = initial.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { millis ->
+                        val picked = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        onChange(draft.copy(anchorDate = picked.toString()))
+                    }
+                    showDatePicker = false
+                }) { Text("Use date") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this bill?") },
+            text = {
+                Text(
+                    "\"${draft.name}\" and its unpaid occurrences will be removed. Transactions already recorded stay in your ledger."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    description: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                description,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}

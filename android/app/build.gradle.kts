@@ -22,8 +22,11 @@ android {
         // would reject.
         // 0.4.0: Settings can change the account password after confirming the
         // current one; the change signs out every other device.
-        versionCode = 6
-        versionName = "0.4.0"
+        // 0.5.0: everything first-run setup collected is editable in the app —
+        // paydays and income sources, bills, the month's budget — plus profile,
+        // categories, merchant aliases, notification rules and export.
+        versionCode = 7
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic

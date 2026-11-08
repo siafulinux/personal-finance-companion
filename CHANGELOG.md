@@ -8,6 +8,48 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.5.0] — 2026-11-08 — Android editing release
+
+An Android-only release: `versionName` `0.5.0`, `versionCode` 7, application id
+`com.pfc.companion`. The server (`APP_VERSION` `2.0.0`) and web app are unchanged. A minor
+bump because the app gains capabilities the website already had, not repairs to its own.
+
+### Added
+
+- **Bills can be created, edited and deleted in the app.** The Bills tab has **Add bill**, and
+  every bill carries **Edit**. The form covers name, merchant, expected and minimum amount,
+  first due date, frequency (including a custom interval), payment account, category, notes,
+  and the essential / reserve / active switches. Delete sits in the same form behind a
+  confirmation. The first due date is fixed once a bill exists — moving it would rewrite
+  occurrences the server has already generated — so it is shown read-only when editing.
+- **Budgets are editable in the app.** **Edit budget** on the Budgets tab opens the month's
+  planned income plus a limit for every category, with carry-forward per category. The whole
+  allocation list is sent on save, so a category set to zero loses its allocation, matching
+  the web editor.
+- **Income sources and paydays are editable in the app.** Settings lists each source with its
+  next payday and offers Add / Edit / Remove. A payday can also be cleared, which returns
+  Safe-to-Spend to its fixed horizon — first-run setup previously set this once and left no
+  way back.
+- **Settings now carry the website's other options.** Profile (display name, timezone),
+  appearance, Safe-to-Spend rules (buffer, horizon, both thresholds, both tolerances, pending
+  debits, auto-match), notification toggles and quiet hours, categories (add, archive, delete),
+  merchant aliases (add, remove), JSON export through the share sheet, sign out, and account
+  deletion behind password plus `DELETE`.
+
+### Changed
+
+- **Exported APK** `personal-finance-companion-0.5.0-debug.apk`, replacing the `0.4.0` copy in
+  `/opt/lampp/htdocs/downloads`.
+- **Settings is split into sections.** `SettingsScreen` keeps the server connection and
+  session actions; the newly reachable settings live in `SettingsSections.kt`.
+
+### Not included
+
+- Bills still cannot be marked unpaid, have an occurrence skipped, or be paid from the app;
+  transaction deletion remains web-only. These are absent, not broken.
+
+---
+
 ## [0.4.0] — 2026-11-08 — Change-password release
 
 `versionName` `0.4.0`, `versionCode` 6, application id `com.pfc.companion`. A minor bump

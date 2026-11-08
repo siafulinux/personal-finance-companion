@@ -1,6 +1,9 @@
 package com.pfc.companion.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.util.Calendar
 
 /** Read/write access to the shared finance API, plus session lifecycle. */
@@ -72,6 +75,28 @@ class FinanceRepository(
 
     suspend fun profile(): Profile = api.get("auth/me", Profile.serializer())
 
+    /** Portrait changes made after setup: display name and the timezone "today" follows. */
+    suspend fun updateProfile(displayName: String, timezone: String): Profile =
+        api.patch(
+            "auth/profile",
+            buildJsonObject {
+                put("display_name", displayName.trim())
+                put("timezone", timezone)
+            },
+            Profile.serializer(),
+        )
+
+    /** Safe-to-Spend rules. The server recomputes; the body only states the inputs. */
+    suspend fun updatePreferences(body: JsonObject): Preferences =
+        api.patch("auth/preferences", body, Preferences.serializer())
+
+    suspend fun updateNotifications(body: JsonObject): NotificationPreferences =
+        api.patch(
+            "auth/notification-preferences",
+            body,
+            NotificationPreferences.serializer(),
+        )
+
     suspend fun completeOnboarding(
         displayName: String,
         timezone: String,
@@ -101,6 +126,25 @@ class FinanceRepository(
         OnboardingRequest.serializer(),
         Profile.serializer(),
     )
+
+    suspend fun incomeSources(): List<IncomeSource> = api.get(
+        "income-sources",
+        kotlinx.serialization.builtins.ListSerializer(IncomeSource.serializer()),
+    )
+
+    suspend fun createIncome(draft: IncomeDraft): IncomeSource = api.post(
+        "income-sources",
+        draft.toJson(editing = false),
+        JsonObject.serializer(),
+        IncomeSource.serializer(),
+    )
+
+    suspend fun updateIncome(id: String, draft: IncomeDraft): IncomeSource =
+        api.patch("income-sources/$id", draft.toJson(editing = true), IncomeSource.serializer())
+
+    suspend fun deleteIncome(id: String) {
+        api.delete("income-sources/$id")
+    }
 
     suspend fun dashboard(): Dashboard = api.get("dashboard", Dashboard.serializer())
 
@@ -201,6 +245,22 @@ class FinanceRepository(
 
     suspend fun bills(): BillsResponse = api.get("bills", BillsResponse.serializer())
 
+    suspend fun bill(id: String): Bill = api.get("bills/$id", Bill.serializer())
+
+    suspend fun createBill(draft: BillDraft): Bill = api.post(
+        "bills",
+        draft.toJson(editing = false),
+        JsonObject.serializer(),
+        Bill.serializer(),
+    )
+
+    suspend fun updateBill(id: String, draft: BillDraft): Bill =
+        api.patch("bills/$id", draft.toJson(editing = true), Bill.serializer())
+
+    suspend fun deleteBill(id: String) {
+        api.delete("bills/$id")
+    }
+
     suspend fun upcomingOccurrences(days: Int = 60): List<Occurrence> {
         val end = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, days) }
         val endDate = String.format(
@@ -224,6 +284,65 @@ class FinanceRepository(
     )
 
     suspend fun currentBudget(): BudgetSummary = api.get("budgets/current", BudgetSummary.serializer())
+
+    suspend fun updateBudget(id: String, draft: BudgetDraft): BudgetSummary =
+        api.patch("budgets/$id", draft.toJson(), BudgetSummary.serializer())
+
+    suspend fun allCategories(): List<Category> = api.get(
+        "categories",
+        kotlinx.serialization.builtins.ListSerializer(Category.serializer()),
+        mapOf("include_archived" to "true"),
+    )
+
+    suspend fun createCategory(name: String, color: String): Category = api.post(
+        "categories",
+        buildJsonObject {
+            put("name", name.trim())
+            put("color", color)
+            put("kind", "expense")
+        },
+        JsonObject.serializer(),
+        Category.serializer(),
+    )
+
+    suspend fun archiveCategory(id: String): Category =
+        api.post("categories/$id/archive", EmptyBody(), EmptyBody.serializer(), Category.serializer())
+
+    suspend fun deleteCategory(id: String) {
+        api.delete("categories/$id")
+    }
+
+    suspend fun merchantAliases(): List<MerchantAlias> = api.get(
+        "merchant-aliases",
+        kotlinx.serialization.builtins.ListSerializer(MerchantAlias.serializer()),
+    )
+
+    suspend fun createAlias(alias: String, canonicalMerchant: String): MerchantAlias = api.post(
+        "merchant-aliases",
+        buildJsonObject {
+            put("alias", alias.trim())
+            put("canonical_merchant", canonicalMerchant.trim())
+        },
+        JsonObject.serializer(),
+        MerchantAlias.serializer(),
+    )
+
+    suspend fun deleteAlias(id: String) {
+        api.delete("merchant-aliases/$id")
+    }
+
+    /** The complete account export, as the server rendered it. */
+    suspend fun exportJson(): String = api.getRaw("account/export")
+
+    suspend fun deleteAccount(password: String, confirm: String) {
+        api.postNoContent(
+            "account/delete",
+            buildJsonObject {
+                put("password", password)
+                put("confirm", confirm)
+            }.toString(),
+        )
+    }
 
     suspend fun shoppingCheck(storeName: String, categoryId: String, amount: String?): ShoppingResult =
         api.post(

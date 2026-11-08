@@ -83,13 +83,51 @@ data class Preferences(
     @SerialName("minimum_balance_buffer") val minimumBalanceBuffer: String = "0.00",
     @SerialName("safe_to_spend_horizon_days") val horizonDays: Int = 14,
     @SerialName("include_pending_debits") val includePendingDebits: Boolean = true,
+    @SerialName("auto_bill_matching") val autoBillMatching: Boolean = true,
+    @SerialName("match_tolerance_amount") val matchToleranceAmount: String = "2.00",
+    @SerialName("match_tolerance_percent") val matchTolerancePercent: String = "1.00",
+    @SerialName("auto_match_threshold") val autoMatchThreshold: String = "0.850",
+    @SerialName("suggestion_threshold") val suggestionThreshold: String = "0.550",
     val theme: String = "system",
+)
+
+@Serializable
+data class NotificationPreferences(
+    @SerialName("shopping_assistant_enabled") val shoppingAssistantEnabled: Boolean = true,
+    @SerialName("bill_reminders_enabled") val billRemindersEnabled: Boolean = true,
+    @SerialName("low_money_warnings_enabled") val lowMoneyWarningsEnabled: Boolean = true,
+    @SerialName("favorite_store_reminders_enabled") val favoriteStoreRemindersEnabled: Boolean = false,
+    @SerialName("quiet_hours_start") val quietHoursStart: String? = null,
+    @SerialName("quiet_hours_end") val quietHoursEnd: String? = null,
+    @SerialName("quiet_hours_timezone") val quietHoursTimezone: String? = null,
+)
+
+/** A paycheck or other regular income. [nextPayday] is the baseline setup asks for. */
+@Serializable
+data class IncomeSource(
+    val id: String,
+    val name: String,
+    val amount: String = "0.00",
+    val frequency: String = "biweekly",
+    @SerialName("next_payday") val nextPayday: String? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    val notes: String? = null,
+)
+
+/** Teaches bill matching that a statement descriptor belongs to a known merchant. */
+@Serializable
+data class MerchantAlias(
+    val id: String,
+    val alias: String,
+    @SerialName("canonical_merchant") val canonicalMerchant: String,
 )
 
 @Serializable
 data class Profile(
     val user: User,
     val preferences: Preferences = Preferences(),
+    @SerialName("notification_preferences") val notificationPreferences: NotificationPreferences =
+        NotificationPreferences(),
 )
 
 @Serializable
@@ -116,6 +154,7 @@ data class Category(
     val name: String,
     val kind: String = "expense",
     val color: String = "#64748b",
+    @SerialName("is_archived") val isArchived: Boolean = false,
 )
 
 @Serializable
@@ -275,12 +314,17 @@ data class BudgetRow(
     val remaining: String = "0.00",
     @SerialName("percent_used") val percentUsed: String = "0.00",
     @SerialName("upcoming_commitments") val upcomingCommitments: String = "0.00",
+    @SerialName("carryover_enabled") val carryoverEnabled: Boolean = false,
 )
 
 @Serializable
 data class BudgetSummary(
+    val id: String = "",
     val year: Int,
     val month: Int,
+    val name: String? = null,
+    val notes: String? = null,
+    @SerialName("planned_income") val plannedIncome: String? = null,
     @SerialName("total_allocated") val totalAllocated: String = "0.00",
     @SerialName("total_spent") val totalSpent: String = "0.00",
     @SerialName("total_remaining") val totalRemaining: String = "0.00",
@@ -296,7 +340,16 @@ data class Bill(
     val name: String,
     val merchant: String? = null,
     @SerialName("expected_amount") val expectedAmount: String,
+    @SerialName("minimum_amount") val minimumAmount: String? = null,
+    @SerialName("due_day") val dueDay: Int? = null,
+    @SerialName("anchor_date") val anchorDate: String? = null,
     val frequency: String = "monthly",
+    @SerialName("custom_interval_days") val customIntervalDays: Int? = null,
+    @SerialName("account_id") val accountId: String? = null,
+    @SerialName("category_id") val categoryId: String? = null,
+    val notes: String? = null,
+    @SerialName("reserve_in_safe_to_spend") val reserveInSafeToSpend: Boolean = true,
+    @SerialName("auto_pay") val autoPay: Boolean = false,
     @SerialName("next_due_date") val nextDueDate: String? = null,
     @SerialName("is_overdue") val isOverdue: Boolean = false,
     @SerialName("is_essential") val isEssential: Boolean = true,

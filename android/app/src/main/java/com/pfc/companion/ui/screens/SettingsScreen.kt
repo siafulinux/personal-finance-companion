@@ -11,16 +11,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,11 +30,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pfc.companion.ServiceLocator
@@ -45,19 +48,39 @@ import com.pfc.companion.ui.components.ScreenHeader
 import com.pfc.companion.ui.components.SectionCard
 import com.pfc.companion.ui.components.UiState
 import com.pfc.companion.ui.components.rememberScreenViewModel
+import com.pfc.companion.ui.vm.IncomeViewModel
+import com.pfc.companion.ui.vm.PasswordFormState
 import com.pfc.companion.ui.vm.ServerConnectionViewModel
 import com.pfc.companion.ui.vm.ServerTestState
 import com.pfc.companion.ui.vm.SettingsViewModel
-import com.pfc.companion.ui.vm.PasswordFormState
+import com.pfc.companion.ui.vm.TaxonomyViewModel
 
 private val themes = listOf("system" to "System", "light" to "Light", "dark" to "Dark")
 
+/**
+ * Everything the web settings page offers, in the same order: who you are, the
+ * server you talk to, how the ledger looks, how it calculates, what it may tell
+ * you, the planning inputs (income, payday, categories, aliases), and your data.
+ */
 @Composable
 fun SettingsScreen(onSignOut: () -> Unit) {
     val viewModel = rememberScreenViewModel("settings") { SettingsViewModel(ServiceLocator.repository) }
+    val incomeViewModel = rememberScreenViewModel("settings-income") { IncomeViewModel(ServiceLocator.repository) }
+    val taxonomyViewModel = rememberScreenViewModel("settings-taxonomy") {
+        TaxonomyViewModel(ServiceLocator.repository)
+    }
     val profileState by viewModel.profile.collectAsStateWithLifecycle()
     val theme by viewModel.theme.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val formError by viewModel.formError.collectAsStateWithLifecycle()
+    val saving by viewModel.saving.collectAsStateWithLifecycle()
+    val deletion by viewModel.deletion.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // The account is gone; the app must not keep pretending to be signed in.
+    LaunchedEffect(deletion.done) {
+        if (deletion.done) onSignOut()
+    }
 
     Column(
         modifier = Modifier
@@ -68,47 +91,64 @@ fun SettingsScreen(onSignOut: () -> Unit) {
     ) {
         ScreenHeader(
             eyebrow = "Settings",
-            title = "Your account and server",
+            title = "Your account, plan and server",
             description = "The Android app reads and writes the same ledger as the web app. Nothing financial is stored on this device.",
         )
 
         if (message != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        message!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::clearMessage) { Text("Dismiss") }
+                }
+            }
+        }
+
+        val problem = formError ?: deletion.error
+        if (problem != null) {
             Text(
-                message!!,
+                problem,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.error,
             )
         }
 
         when (val current = profileState) {
             is UiState.Loading -> LoadingPane("Loading your profile")
             is UiState.Failed -> ErrorPane(current.message, onRetry = viewModel::refresh)
-            is UiState.Ready -> SectionCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column {
+            is UiState.Ready -> {
+                if (current.data.user.isDemo) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            current.data.user.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            current.data.user.email,
+                            "Demo account: every record here is sample data.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                    if (current.data.user.isDemo) {
-                        Pill("Demo data", PillTone.Warning)
+                        Pill("Demo", PillTone.Warning)
                     }
                 }
-                Spacer(Modifier.padding(top = 8.dp))
-                Text(
-                    "${current.data.user.timezone} · ${current.data.user.currency}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ProfileSection(
+                    profile = current.data,
+                    saving = saving,
+                    onSave = viewModel::saveProfile,
                 )
             }
         }
@@ -125,9 +165,42 @@ fun SettingsScreen(onSignOut: () -> Unit) {
                     )
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "The theme follows this device. Every other setting is stored on your server and shared with the web app.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         PasswordSection(viewModel)
+
+        when (val current = profileState) {
+            is UiState.Ready -> {
+                RulesSection(
+                    preferences = current.data.preferences,
+                    saving = saving,
+                    onSave = viewModel::saveRules,
+                )
+                NotificationsSection(
+                    notifications = current.data.notificationPreferences,
+                    timezone = current.data.user.timezone,
+                    saving = saving,
+                    onSave = viewModel::saveNotifications,
+                )
+            }
+            else -> Unit
+        }
+
+        IncomeSection(incomeViewModel, onMessage = viewModel::showMessage)
+
+        TaxonomySection(taxonomyViewModel)
+
+        DataSection(
+            saving = saving,
+            onExport = { viewModel.export { json -> shareExport(context, json) } },
+            onDeleteAccount = viewModel::deleteAccount,
+        )
 
         SectionCard(title = "Session") {
             Text(
@@ -143,8 +216,8 @@ fun SettingsScreen(onSignOut: () -> Unit) {
 
         SectionCard(title = "About this phase") {
             Text(
-                "Phase 2 connects the app to any self-hosted server. Bank synchronization, insights and the assistant " +
-                    "live in the web app; this app reads the same authoritative numbers.",
+                "This app reads the same authoritative numbers as the web app. Everything the web settings page can change, " +
+                    "this screen can change too — through the same authenticated API.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

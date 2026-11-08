@@ -97,6 +97,10 @@ class ApiClient(
         executeRaw(Request.Builder().url(buildUrl(path)).delete().build())
     }
 
+    /** Fetches a JSON document as text, for callers that hand the file to the OS. */
+    suspend fun getRaw(path: String): String =
+        executeRaw(Request.Builder().url(buildUrl(path)).get().build())
+
     /**
      * Reads a URL verbatim without attaching any credential.
      *

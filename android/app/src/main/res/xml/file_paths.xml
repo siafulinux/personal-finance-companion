@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the exports directory is shared, so no other app can read this app's files. -->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

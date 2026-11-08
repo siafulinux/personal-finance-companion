@@ -85,7 +85,7 @@ fun OnboardingScreen(profile: Profile, onDone: (Profile) -> Unit) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                "Timezone: ${profile.user.timezone}",
+                "Timezone: ${profile.user.timezone} — change it later in Settings.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -197,7 +197,7 @@ fun OnboardingScreen(profile: Profile, onDone: (Profile) -> Unit) {
         }
 
         Text(
-            "You can add other accounts, budgets and recurring bills on the web app. The same server is the source of truth for both apps.",
+            "Everything here can be changed later in Settings and Bills. The same server is the source of truth for both apps.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
