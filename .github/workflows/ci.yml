@@ -1,9 +1,13 @@
 name: CI
 
-# Every push, on any branch. Pull requests are checked too, so a branch is
-# verified before it is merged rather than only after.
+# Branch pushes and pull requests, so a branch is verified before it is merged
+# rather than only after. Tag pushes are deliberately excluded: a tag names a
+# commit a branch push already verified, so sending it through the suite again
+# spends runner minutes on an identical SHA without adding a signal. Note that
+# naming `branches` here is what excludes tags -- a bare `push:` covers both.
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:
