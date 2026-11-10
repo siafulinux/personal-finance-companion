@@ -158,7 +158,16 @@ function ProviderCard({
         </p>
       ) : null}
 
-      <div className="page-stack" style={{ gap: "0.9rem", marginTop: "0.9rem" }}>
+      {/* A real form, so Enter in a credential field saves. Without it the only way
+          to submit was the button, and typed values silently went nowhere. */}
+      <form
+        className="page-stack"
+        style={{ gap: "0.9rem", marginTop: "0.9rem" }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
         <div style={{ display: "grid", gap: "0.9rem", gridTemplateColumns: "1fr 1fr" }}>
           <Field label="Environment" htmlFor={`${provider.name}-environment`}>
             <Select
@@ -213,6 +222,7 @@ function ProviderCard({
             />
             {field.present ? (
               <Button
+                type="button"
                 size="sm"
                 variant="ghost"
                 onClick={() => {
@@ -238,11 +248,11 @@ function ProviderCard({
         ) : null}
 
         <div>
-          <Button onClick={submit} loading={save.isPending}>
+          <Button type="submit" loading={save.isPending}>
             Save {provider.label} configuration
           </Button>
         </div>
-      </div>
+      </form>
     </Card>
   );
 }
@@ -421,9 +431,11 @@ export function ProvidersPage() {
         ) : null}
       </Card>
 
+      {/* Keyed by name only: a refetch (after a test, or any refresh) used to remount
+          the card, which discarded credentials the owner had just typed. */}
       {overview.providers.map((provider) => (
         <ProviderCard
-          key={`${provider.name}:${provider.enabled}:${provider.priority}:${provider.environment}:${provider.configured}:${provider.source}`}
+          key={provider.name}
           provider={provider}
           primary={provider.name === primary}
           onChanged={refresh}

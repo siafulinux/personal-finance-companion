@@ -60,7 +60,10 @@ def _cell(row: dict[str, object]) -> str:
         return f"not available — {row.get('reason') or 'unknown'}"
     if not isinstance(match, dict):
         reason = str(row.get("reason") or "no match")
-        return "not listed" if reason == "not listed" else f"not listed — {reason}"
+        # "not listed" is a claim about the institution, and only the institution's own
+        # directory can make it. Anything else — an unreachable directory, an auth
+        # failure — means this server could not ask, which is a different row.
+        return "not listed" if reason == "not listed" else f"not available — {reason}"
     products = ", ".join(match.get("products") or []) or "no products reported"
     flags = []
     if not match.get("transactions"):

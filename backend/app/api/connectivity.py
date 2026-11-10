@@ -83,8 +83,10 @@ def get_catalog(
     result = provider_selection.catalog(db, query, limit=limit)
     body = result.as_dict()
     # Tell the user plainly when nothing can be connected at all, rather than showing an
-    # empty search box with no explanation.
-    body["configured"] = any(entry["available"] for entry in body["institutions"])
+    # empty search box with no explanation. This asks about the server's providers, not
+    # about this search: a bank the directory does not carry must not read as "the
+    # administrator has not finished setup".
+    body["configured"] = provider_selection.configured(db)
     return body
 
 

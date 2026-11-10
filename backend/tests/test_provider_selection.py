@@ -186,6 +186,29 @@ def test_unconfigured_provider_is_skipped(db, world):
     assert entry.provider == "plaid"
 
 
+def test_configured_describes_the_server_not_the_search_query(db, world):
+    """A bank the directory does not carry must not read as "no provider configured".
+
+    The user-facing flag drives a message that blames the administrator, so it may only
+    be false when the server genuinely has nothing to connect with.
+    """
+    world.adapters["teller"].institutions = [_institution("teller", "USAA")]
+    world.adapters["plaid"].institutions = []
+
+    assert provider_selection.catalog(db, "Cash App").entries == []
+    assert provider_selection.configured(db) is True
+
+
+def test_configured_is_false_only_when_nothing_is_usable(db, world):
+    world.states.clear()
+    world.states.extend(
+        [_state("teller", 10, enabled=False), _state("plaid", 20, configured=False)]
+    )
+
+    # The `world` fixture also switches the simulated provider off.
+    assert provider_selection.configured(db) is False
+
+
 def test_catalog_does_not_reveal_the_provider(db, world):
     world.adapters["teller"].institutions = [_institution("teller", "USAA")]
     payload = provider_selection.catalog(db, "USAA").as_dict()
