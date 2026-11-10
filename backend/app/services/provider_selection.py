@@ -150,6 +150,19 @@ def _institutions_for(db: Session, provider: str, query: str | None) -> list[Pro
     return rows
 
 
+def configured(db: Session) -> bool:
+    """Whether this server can connect *anything at all*.
+
+    Deliberately independent of the search query. An empty result for ``USAA`` means
+    this server has no provider that lists USAA -- not that no provider is configured.
+    Deriving the flag from the filtered list conflated the two and told the user to
+    "ask the administrator to finish the provider configuration" whenever their bank
+    was not in the directory.
+    """
+    providers, _auto = _ordered_providers(db)
+    return bool(providers)
+
+
 # ---------------------------------------------------------------------- catalogue
 def catalog(db: Session, query: str | None = None, *, limit: int = 40) -> Catalog:
     """Institutions matching ``query``, each resolved to at most one provider."""
@@ -271,12 +284,15 @@ def coverage(db: Session, names: list[str]) -> dict[str, Any]:
             try:
                 found = _institutions_for(db, provider, needle)
             except ProviderError as exc:
+                # The directory did not answer, so this says nothing about the
+                # institution. It must never be reported as "not listed", which means
+                # "the directory answered and does not carry it".
                 rows.append(
                     {
                         "provider": provider,
                         "label": provider_config.PROVIDER_LABELS.get(provider, provider.title()),
-                        "available": True,
-                        "reason": f"directory unavailable ({exc.code})",
+                        "available": False,
+                        "reason": f"directory unreachable ({exc.code})",
                         "match": None,
                     }
                 )
@@ -424,6 +440,7 @@ __all__ = [
     "Selection",
     "catalog",
     "clear_cache",
+    "configured",
     "coverage",
     "finish_link",
     "institution_key",

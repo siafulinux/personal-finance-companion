@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 
+from app.config import settings
 from app.models import User
 from app.providers.sandbox import advance, reset_state
 from app.services.users import register_user
@@ -30,6 +31,35 @@ def _connect(auth_client):
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_catalog_configured_reflects_the_server_not_the_search(auth_client, monkeypatch):
+    """An unknown institution is "no match", never "the administrator has not set this up".
+
+    The simulated provider is enabled here, so the server can connect something. A query
+    that matches nothing must still report ``configured`` true; otherwise the UI tells the
+    user to ask an administrator about a server that is working as intended.
+    """
+    monkeypatch.setattr(settings, "sandbox_provider_enabled", True)
+
+    response = auth_client.get(
+        f"{API}/connectivity/catalog", params={"query": "Zzz Not A Bank"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["institutions"] == []
+    assert body["configured"] is True
+
+
+def test_catalog_offers_the_simulated_institution_when_nothing_else_is_set_up(
+    auth_client, monkeypatch
+):
+    """With no credentials saved, the demo institution is still a usable connection."""
+    monkeypatch.setattr(settings, "sandbox_provider_enabled", True)
+
+    body = auth_client.get(f"{API}/connectivity/catalog").json()
+    assert body["configured"] is True
+    assert any(entry["available"] and entry["simulated"] for entry in body["institutions"])
 
 
 def test_providers_list_explains_what_is_available(auth_client):
