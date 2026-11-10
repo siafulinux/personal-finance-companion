@@ -41,7 +41,14 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-filterwarnings = ["ignore::DeprecationWarning"]
+filterwarnings = [
+    # Deprecation chatter from third-party libraries is not this project's problem.
+    "ignore::DeprecationWarning",
+    # SQLAlchemy's warnings are signals, not noise: "expected to delete N row(s); 0
+    # were matched" is how a double delete announces itself, and it used to scroll by
+    # in a passing run. A SAWarning now fails the test that provoked it.
+    "error::sqlalchemy.exc.SAWarning",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
