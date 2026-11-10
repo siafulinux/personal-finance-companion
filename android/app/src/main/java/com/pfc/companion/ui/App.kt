@@ -22,13 +22,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.pfc.companion.R
 import com.pfc.companion.ServiceLocator
 import com.pfc.companion.data.ApiException
 import com.pfc.companion.data.Profile
@@ -41,6 +42,7 @@ import com.pfc.companion.ui.screens.ImportScreen
 import com.pfc.companion.ui.screens.LedgerScreen
 import com.pfc.companion.ui.screens.LoansScreen
 import com.pfc.companion.ui.screens.ObligationsScreen
+import com.pfc.companion.ui.screens.PlanScreen
 import com.pfc.companion.ui.screens.SavingsScreen
 import com.pfc.companion.ui.screens.LoginScreen
 import com.pfc.companion.ui.screens.OnboardingScreen
@@ -61,15 +63,28 @@ private sealed interface Session {
 private data class Destination(
     val route: String,
     val label: String,
-    val icon: ImageVector,
+    val icon: @Composable () -> Unit,
 )
 
+// Six tabs is the most a NavigationBar can label legibly at a phone width; Plan
+// carries the three screens that previously existed only behind a dashboard card.
 private val destinations = listOf(
-    Destination("home", "Home", Icons.Filled.Home),
-    Destination("ledger", "Ledger", Icons.AutoMirrored.Filled.List),
-    Destination("bills", "Bills", Icons.Filled.DateRange),
-    Destination("budgets", "Budgets", Icons.Filled.Star),
-    Destination("settings", "Settings", Icons.Filled.Settings),
+    Destination("home", "Home") { Icon(Icons.Filled.Home, contentDescription = null) },
+    Destination("ledger", "Ledger") {
+        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+    },
+    Destination("bills", "Bills") {
+        Icon(Icons.Filled.DateRange, contentDescription = null)
+    },
+    Destination("budgets", "Budgets") {
+        Icon(Icons.Filled.Star, contentDescription = null)
+    },
+    Destination("plan", "Plan") {
+        Icon(painterResource(R.drawable.ic_plan), contentDescription = null)
+    },
+    Destination("settings", "Settings") {
+        Icon(Icons.Filled.Settings, contentDescription = null)
+    },
 )
 
 @Composable
@@ -134,7 +149,7 @@ private fun MainShell() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(destination.icon, contentDescription = null) },
+                        icon = destination.icon,
                         label = { Text(destination.label) },
                     )
                 }
@@ -234,6 +249,13 @@ private fun MainShell() {
             }
             composable("budgets") {
                 BudgetsScreen(flash = flash, onFlashShown = { flash = null })
+            }
+            composable("plan") {
+                PlanScreen(
+                    onOpenLoans = { navController.navigate("loans") },
+                    onOpenSavings = { navController.navigate("savings") },
+                    onOpenObligations = { navController.navigate("obligations") },
+                )
             }
             composable("shopping") {
                 ShoppingScreen(onBack = { navController.popBackStack() })
