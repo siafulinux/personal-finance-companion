@@ -352,6 +352,127 @@ class FinanceRepository(
             ShoppingResult.serializer(),
         )
 
+    // ---------------------------------------------------------------- Phase 4
+    suspend fun loans(): LoanSummary = api.get("loans", LoanSummary.serializer())
+
+    suspend fun createLoan(body: JsonObject): Loan =
+        api.postJson("loans", body, Loan.serializer())
+
+    suspend fun updateLoan(id: String, body: JsonObject): Loan =
+        api.patch("loans/$id", body, Loan.serializer())
+
+    suspend fun deleteLoan(id: String) {
+        api.delete("loans/$id")
+    }
+
+    suspend fun addLoanPayment(loanId: String, body: JsonObject): LoanPayment =
+        api.postJson("loans/$loanId/payments", body, LoanPayment.serializer())
+
+    suspend fun loanPayments(loanId: String): List<LoanPayment> = api.get(
+        "loans/$loanId/payments",
+        kotlinx.serialization.builtins.ListSerializer(LoanPayment.serializer()),
+    )
+
+    suspend fun loanSuggestions(loanId: String): LoanPaymentSuggestions =
+        api.get("loans/$loanId/suggestions", LoanPaymentSuggestions.serializer())
+
+    /** A suggested repayment the user judges to be a real one. */
+    suspend fun confirmLoanPayment(loanId: String, paymentId: String): LoanPayment =
+        api.postJson(
+            "loans/$loanId/payments/$paymentId/confirm",
+            buildJsonObject { },
+            LoanPayment.serializer(),
+        )
+
+    /** "That is not this loan's repayment" — the payment stays out of the balance. */
+    suspend fun rejectLoanPayment(loanId: String, paymentId: String): LoanPayment =
+        api.postJson(
+            "loans/$loanId/payments/$paymentId/reject",
+            buildJsonObject { },
+            LoanPayment.serializer(),
+        )
+
+    suspend fun acceptLoanSuggestion(loanId: String, transactionId: String): LoanPayment =
+        api.postJson(
+            "loans/$loanId/suggestions/$transactionId",
+            buildJsonObject { put("confirm", true) },
+            LoanPayment.serializer(),
+        )
+
+    suspend fun savings(): SavingsSummary = api.get("savings", SavingsSummary.serializer())
+
+    suspend fun createSavingsGoal(body: JsonObject): SavingsGoal =
+        api.postJson("savings", body, SavingsGoal.serializer())
+
+    suspend fun updateSavingsGoal(id: String, body: JsonObject): SavingsGoal =
+        api.patch("savings/$id", body, SavingsGoal.serializer())
+
+    suspend fun deleteSavingsGoal(id: String) {
+        api.delete("savings/$id")
+    }
+
+    suspend fun contributeToGoal(id: String, amount: String, on: String?): SavingsGoal =
+        api.postJson(
+            "savings/$id/contributions",
+            buildJsonObject {
+                put("amount", amount)
+                if (on != null) put("contributed_on", on)
+            },
+            SavingsGoal.serializer(),
+        )
+
+    suspend fun obligations(): Obligations = api.get("obligations", Obligations.serializer())
+
+    // ------------------------------------------------- location-aware shopping
+    suspend fun locationSettings(): LocationSettings =
+        api.get("shopping/location-settings", LocationSettings.serializer())
+
+    suspend fun updateLocationSettings(body: JsonObject): LocationSettings =
+        api.patch("shopping/location-settings", body, LocationSettings.serializer())
+
+    suspend fun trackedLocations(): List<TrackedLocation> = api.get(
+        "shopping/locations",
+        kotlinx.serialization.builtins.ListSerializer(TrackedLocation.serializer()),
+    )
+
+    suspend fun createLocation(body: JsonObject): TrackedLocation =
+        api.postJson("shopping/locations", body, TrackedLocation.serializer())
+
+    /** Adds a detected place to the tracked list, keeping the detection's own fix. */
+    suspend fun createLocationFromVisit(visitId: String, body: JsonObject): TrackedLocation =
+        api.postJson("shopping/locations/from-visit/$visitId", body, TrackedLocation.serializer())
+
+    suspend fun updateLocation(id: String, body: JsonObject): TrackedLocation =
+        api.patch("shopping/locations/$id", body, TrackedLocation.serializer())
+
+    suspend fun deleteLocation(id: String) {
+        api.delete("shopping/locations/$id")
+    }
+
+    suspend fun shoppingVisits(): ShoppingVisits =
+        api.get("shopping/visits", ShoppingVisits.serializer())
+
+    /** Geofence entry: only the identifier is sent, never a coordinate. */
+    suspend fun recordArrival(locationId: String): VisitRecordResult =
+        api.postJson("shopping/locations/$locationId/arrive", buildJsonObject { }, VisitRecordResult.serializer())
+
+    /** A single detected fix, used by low-power discovery. */
+    suspend fun detectVisit(body: JsonObject): VisitRecordResult =
+        api.postJson("shopping/visits/detect", body, VisitRecordResult.serializer())
+
+    suspend fun ignoreVisit(id: String) {
+        api.postNoContent("shopping/visits/$id/ignore")
+    }
+
+    suspend fun deleteVisit(id: String) {
+        api.delete("shopping/visits/$id")
+    }
+
+    suspend fun clearVisits() {
+        // The server deletes every visit and keeps the tracked places.
+        api.delete("shopping/visits")
+    }
+
     /**
      * Asks a server what it is, before it is selected. Never authenticates, so the
      * password and session of the currently configured server stay with it.

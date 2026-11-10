@@ -25,8 +25,11 @@ android {
         // 0.5.0: everything first-run setup collected is editable in the app —
         // paydays and income sources, bills, the month's budget — plus profile,
         // categories, merchant aliases, notification rules and export.
-        versionCode = 7
-        versionName = "0.5.0"
+        // 0.6.0: Phase 4 — loans and advances, savings goals, unified obligations,
+        // the Safe-to-Spend breakdown, merchant insights and location-aware
+        // Shopping Intelligence.
+        versionCode = 8
+        versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
@@ -81,6 +84,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Shopping Intelligence: geofences for saved places and Activity Recognition
+    // for low-power discovery. Battery-conscious APIs only; no continuous GPS.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // .await() on the Play services Task returned by the geofence and location APIs.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

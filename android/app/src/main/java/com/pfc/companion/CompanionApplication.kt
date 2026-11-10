@@ -11,6 +11,10 @@ object ServiceLocator {
     lateinit var repository: FinanceRepository
         private set
 
+    /** BroadcastReceivers run before (or without) a visible Activity; check first. */
+    val isReady: Boolean
+        get() = ::repository.isInitialized
+
     fun init(app: Application) {
         if (::repository.isInitialized) return
         session = SessionStore(app)

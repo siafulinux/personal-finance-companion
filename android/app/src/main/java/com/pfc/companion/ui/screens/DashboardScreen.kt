@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +55,10 @@ import com.pfc.companion.util.relativeDueLabel
 fun DashboardScreen(
     onOpenShopping: () -> Unit,
     onOpenLedger: () -> Unit,
+    onOpenLoans: () -> Unit,
+    onOpenSavings: () -> Unit,
+    onOpenObligations: () -> Unit,
+    onOpenShoppingIntelligence: () -> Unit,
 ) {
     val viewModel = rememberScreenViewModel("dashboard") {
         DashboardViewModel(ServiceLocator.repository)
@@ -76,6 +81,10 @@ fun DashboardScreen(
             onMarkPaid = viewModel::markPaid,
             onOpenShopping = onOpenShopping,
             onOpenLedger = onOpenLedger,
+            onOpenLoans = onOpenLoans,
+            onOpenSavings = onOpenSavings,
+            onOpenObligations = onOpenObligations,
+            onOpenShoppingIntelligence = onOpenShoppingIntelligence,
             onRefresh = viewModel::refresh,
         )
     }
@@ -89,6 +98,10 @@ private fun DashboardContent(
     onMarkPaid: (String) -> Unit,
     onOpenShopping: () -> Unit,
     onOpenLedger: () -> Unit,
+    onOpenLoans: () -> Unit,
+    onOpenSavings: () -> Unit,
+    onOpenObligations: () -> Unit,
+    onOpenShoppingIntelligence: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     LazyColumn(
@@ -248,11 +261,31 @@ private fun DashboardContent(
 
         item {
             SectionCard(
+                title = "Money plan",
+                subtitle = "Loans, savings and everything already committed.",
+            ) {
+                Button(onClick = onOpenObligations, modifier = Modifier.fillMaxWidth()) {
+                    Text("What is due")
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onOpenLoans, modifier = Modifier.weight(1f)) { Text("Loans") }
+                    Button(onClick = onOpenSavings, modifier = Modifier.weight(1f)) { Text("Savings") }
+                }
+            }
+        }
+
+        item {
+            SectionCard(
                 title = "Before you buy",
                 subtitle = "Check cash and category budget before spending.",
             ) {
                 Button(onClick = onOpenShopping, modifier = Modifier.fillMaxWidth()) {
                     Text("Start a Shopping Check")
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onOpenShoppingIntelligence, modifier = Modifier.fillMaxWidth()) {
+                    Text("Shopping Intelligence settings")
                 }
             }
         }

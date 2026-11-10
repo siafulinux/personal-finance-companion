@@ -39,9 +39,13 @@ import com.pfc.companion.ui.screens.BudgetsScreen
 import com.pfc.companion.ui.screens.DashboardScreen
 import com.pfc.companion.ui.screens.ImportScreen
 import com.pfc.companion.ui.screens.LedgerScreen
+import com.pfc.companion.ui.screens.LoansScreen
+import com.pfc.companion.ui.screens.ObligationsScreen
+import com.pfc.companion.ui.screens.SavingsScreen
 import com.pfc.companion.ui.screens.LoginScreen
 import com.pfc.companion.ui.screens.OnboardingScreen
 import com.pfc.companion.ui.screens.SettingsScreen
+import com.pfc.companion.ui.screens.ShoppingIntelligenceScreen
 import com.pfc.companion.ui.screens.ShoppingScreen
 import com.pfc.companion.ui.screens.TransactionDetailScreen
 import com.pfc.companion.ui.screens.TransactionFormScreen
@@ -146,6 +150,10 @@ private fun MainShell() {
                 DashboardScreen(
                     onOpenShopping = { navController.navigate("shopping") },
                     onOpenLedger = { navController.navigate("ledger") },
+                    onOpenLoans = { navController.navigate("loans") },
+                    onOpenSavings = { navController.navigate("savings") },
+                    onOpenObligations = { navController.navigate("obligations") },
+                    onOpenShoppingIntelligence = { navController.navigate("shopping-intelligence") },
                 )
             }
             composable("ledger") {
@@ -229,6 +237,22 @@ private fun MainShell() {
             }
             composable("shopping") {
                 ShoppingScreen(onBack = { navController.popBackStack() })
+            }
+            composable("shopping-intelligence") {
+                ShoppingIntelligenceScreen(onBack = { navController.popBackStack() })
+            }
+            composable("loans") {
+                LoansScreen(
+                    onBack = { navController.popBackStack() },
+                    flash = flash,
+                    onFlashShown = { flash = null },
+                )
+            }
+            composable("savings") {
+                SavingsScreen(onBack = { navController.popBackStack() })
+            }
+            composable("obligations") {
+                ObligationsScreen(onBack = { navController.popBackStack() })
             }
             composable("settings") {
                 SettingsScreen(

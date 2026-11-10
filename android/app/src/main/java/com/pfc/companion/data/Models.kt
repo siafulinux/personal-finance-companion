@@ -577,3 +577,243 @@ data class ImportRecord(
     val reason: String? = null,
     @SerialName("transaction_id") val transactionId: String? = null,
 )
+
+// ---------------------------------------------------------------- Phase 4: loans
+@Serializable
+data class Loan(
+    val id: String,
+    val name: String,
+    val lender: String? = null,
+    @SerialName("loan_type") val loanType: String = "personal",
+    @SerialName("original_amount") val originalAmount: String = "0.00",
+    @SerialName("opening_balance") val openingBalance: String = "0.00",
+    @SerialName("balance_as_of") val balanceAsOf: String = "",
+    @SerialName("balance_source") val balanceSource: String = "user",
+    val apr: String? = null,
+    @SerialName("interest_charged") val interestCharged: String? = null,
+    @SerialName("fees_charged") val feesCharged: String? = null,
+    @SerialName("next_payment_date") val nextPaymentDate: String? = null,
+    @SerialName("scheduled_payment") val scheduledPayment: String? = null,
+    @SerialName("payment_frequency") val paymentFrequency: String? = null,
+    @SerialName("remaining_payments") val remainingPayments: Int? = null,
+    @SerialName("account_id") val accountId: String? = null,
+    @SerialName("category_id") val categoryId: String? = null,
+    val status: String = "active",
+    val notes: String? = null,
+    val createdAt: String = "",
+    @SerialName("current_balance") val currentBalance: String = "0.00",
+    @SerialName("principal_repaid") val principalRepaid: String = "0.00",
+    @SerialName("interest_paid") val interestPaid: String = "0.00",
+    @SerialName("fees_paid") val feesPaid: String = "0.00",
+    @SerialName("total_repaid") val totalRepaid: String = "0.00",
+    @SerialName("balance_is_estimate") val balanceIsEstimate: Boolean = false,
+    @SerialName("progress_percent") val progressPercent: String = "0.00",
+    @SerialName("payment_count") val paymentCount: Int = 0,
+    @SerialName("last_payment_date") val lastPaymentDate: String? = null,
+    @SerialName("estimated_payoff_date") val estimatedPayoffDate: String? = null,
+    @SerialName("payoff_is_estimate") val payoffIsEstimate: Boolean = false,
+    @SerialName("remaining_installments") val remainingInstallments: Int? = null,
+) {
+    val balance: Double get() = currentBalance.toDoubleOrNull() ?: 0.0
+}
+
+@Serializable
+data class LoanSummary(
+    @SerialName("total_outstanding") val totalOutstanding: String = "0.00",
+    @SerialName("total_original") val totalOriginal: String = "0.00",
+    @SerialName("active_loans") val activeLoans: Int = 0,
+    @SerialName("next_payment_date") val nextPaymentDate: String? = null,
+    @SerialName("next_payment_total") val nextPaymentTotal: String = "0.00",
+    val loans: List<Loan> = emptyList(),
+)
+
+@Serializable
+data class LoanPayment(
+    val id: String,
+    @SerialName("loan_id") val loanId: String,
+    @SerialName("transaction_id") val transactionId: String? = null,
+    val amount: String = "0.00",
+    @SerialName("paid_on") val paidOn: String = "",
+    val status: String = "confirmed",
+    val confidence: String = "1.000",
+    @SerialName("is_automatic") val isAutomatic: Boolean = false,
+    val reason: String? = null,
+    @SerialName("transaction_description") val transactionDescription: String? = null,
+)
+
+@Serializable
+data class LoanPaymentSuggestion(
+    @SerialName("transaction_id") val transactionId: String,
+    val description: String = "",
+    val merchant: String? = null,
+    val amount: String = "0.00",
+    @SerialName("txn_date") val txnDate: String = "",
+    val confidence: String = "0.000",
+    val reason: String = "",
+    @SerialName("is_ambiguous") val isAmbiguous: Boolean = false,
+)
+
+@Serializable
+data class LoanPaymentSuggestions(
+    @SerialName("loan_id") val loanId: String,
+    @SerialName("loan_name") val loanName: String = "",
+    val items: List<LoanPaymentSuggestion> = emptyList(),
+)
+
+// -------------------------------------------------------------- Phase 4: savings
+@Serializable
+data class SavingsGoal(
+    val id: String,
+    val name: String,
+    @SerialName("target_amount") val targetAmount: String = "0.00",
+    @SerialName("target_date") val targetDate: String? = null,
+    val mode: String = "virtual",
+    @SerialName("saved_amount") val savedAmount: String = "0.00",
+    @SerialName("account_id") val accountId: String? = null,
+    @SerialName("account_name") val accountName: String? = null,
+    @SerialName("account_balance") val accountBalance: String? = null,
+    @SerialName("account_is_spendable") val accountIsSpendable: Boolean? = null,
+    @SerialName("category_id") val categoryId: String? = null,
+    @SerialName("contribution_amount") val contributionAmount: String? = null,
+    @SerialName("contribution_frequency") val contributionFrequency: String? = null,
+    val status: String = "active",
+    val notes: String? = null,
+    @SerialName("progress_percent") val progressPercent: String = "0.00",
+    @SerialName("remaining_to_target") val remainingToTarget: String = "0.00",
+    @SerialName("protected_amount") val protectedAmount: String = "0.00",
+    @SerialName("protects_money") val protectsMoney: Boolean = false,
+    @SerialName("next_contribution_date") val nextContributionDate: String? = null,
+    @SerialName("required_per_period") val requiredPerPeriod: String? = null,
+    @SerialName("projected_completion") val projectedCompletion: String? = null,
+)
+
+@Serializable
+data class SavingsSummary(
+    @SerialName("total_target") val totalTarget: String = "0.00",
+    @SerialName("total_saved") val totalSaved: String = "0.00",
+    @SerialName("total_protected") val totalProtected: String = "0.00",
+    @SerialName("active_goals") val activeGoals: Int = 0,
+    @SerialName("completed_goals") val completedGoals: Int = 0,
+    @SerialName("monthly_commitment") val monthlyCommitment: String = "0.00",
+    val goals: List<SavingsGoal> = emptyList(),
+)
+
+// ----------------------------------------------------------- Phase 4: obligations
+@Serializable
+data class ObligationItem(
+    val kind: String = "bill",
+    val id: String,
+    @SerialName("source_id") val sourceId: String = "",
+    val name: String = "",
+    val detail: String? = null,
+    @SerialName("due_date") val dueDate: String? = null,
+    val amount: String = "0.00",
+    val status: String = "upcoming",
+    @SerialName("is_overdue") val isOverdue: Boolean = false,
+    @SerialName("is_estimate") val isEstimate: Boolean = false,
+    @SerialName("is_essential") val isEssential: Boolean = true,
+    @SerialName("reserved_in_safe_to_spend") val reservedInSafeToSpend: Boolean = true,
+)
+
+@Serializable
+data class ObligationTotals(
+    @SerialName("due_in_horizon") val dueInHorizon: String = "0.00",
+    val overdue: String = "0.00",
+    @SerialName("due_within_7_days") val dueWithin7Days: String = "0.00",
+    @SerialName("due_before_payday") val dueBeforePayday: String = "0.00",
+)
+
+@Serializable
+data class Obligations(
+    val today: String = "",
+    @SerialName("horizon_end") val horizonEnd: String = "",
+    @SerialName("next_payday") val nextPayday: String? = null,
+    val items: List<ObligationItem> = emptyList(),
+    val totals: ObligationTotals = ObligationTotals(),
+    @SerialName("double_counting_guards") val guards: List<String> = emptyList(),
+)
+
+// ------------------------------------------------- Phase 4: merchant and location
+@Serializable
+data class TrackedLocation(
+    val id: String,
+    val name: String,
+    val merchant: String? = null,
+    val address: String? = null,
+    val latitude: String? = null,
+    val longitude: String? = null,
+    @SerialName("radius_m") val radiusM: Int = 150,
+    @SerialName("category_id") val categoryId: String? = null,
+    @SerialName("monthly_budget") val monthlyBudget: String? = null,
+    @SerialName("notify_enabled") val notifyEnabled: Boolean = true,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("visit_count") val visitCount: Int = 0,
+    @SerialName("last_visit_at") val lastVisitAt: String? = null,
+    @SerialName("month_spend") val monthSpend: String? = null,
+    @SerialName("budget_remaining") val budgetRemaining: String? = null,
+) {
+    val hasCoordinates: Boolean get() = !latitude.isNullOrBlank() && !longitude.isNullOrBlank()
+}
+
+@Serializable
+data class ShoppingVisit(
+    val id: String,
+    @SerialName("tracked_location_id") val trackedLocationId: String? = null,
+    @SerialName("business_name") val businessName: String = "",
+    @SerialName("visit_day") val visitDay: String = "",
+    @SerialName("visited_at") val visitedAt: String = "",
+    val status: String = "detected",
+    val confidence: String = "0.000",
+    @SerialName("is_new_place") val isNewPlace: Boolean = false,
+    @SerialName("visit_count") val visitCount: Int = 0,
+    @SerialName("transaction_count") val transactionCount: Int = 0,
+    @SerialName("spend_total") val spendTotal: String = "0.00",
+)
+
+@Serializable
+data class ShoppingVisits(
+    val items: List<ShoppingVisit> = emptyList(),
+    val count: Int = 0,
+    val suggested: Int = 0,
+    val note: String = "",
+)
+
+@Serializable
+data class LocationSettings(
+    @SerialName("location_features_opted_in") val optedIn: Boolean = false,
+    @SerialName("shopping_intelligence_enabled") val enabled: Boolean = false,
+    @SerialName("discovery_enabled") val discoveryEnabled: Boolean = false,
+    val paused: Boolean = false,
+    @SerialName("location_paused_until") val pausedUntil: String? = null,
+    @SerialName("quiet_hours_start") val quietStart: String? = null,
+    @SerialName("quiet_hours_end") val quietEnd: String? = null,
+    @SerialName("quiet_hours_timezone") val quietTimezone: String? = null,
+    @SerialName("notification_cooldown_minutes") val cooldownMinutes: Int = 120,
+    @SerialName("visit_history_retention_days") val retentionDays: Int = 90,
+    @SerialName("tracked_location_count") val trackedLocationCount: Int = 0,
+)
+
+@Serializable
+data class VisitPrompt(
+    @SerialName("visit_id") val visitId: String = "",
+    @SerialName("business_name") val businessName: String = "",
+    val tracked: Boolean = false,
+    val message: String = "",
+    @SerialName("safe_to_spend") val safeToSpend: String = "0.00",
+    @SerialName("store_budget") val storeBudget: String? = null,
+    @SerialName("store_remaining") val storeRemaining: String? = null,
+    @SerialName("typical_spend") val typicalSpend: String? = null,
+    @SerialName("suggested_limit") val suggestedLimit: String? = null,
+    @SerialName("upcoming_obligations_total") val upcomingObligations: String = "0.00",
+    @SerialName("data_is_stale") val dataIsStale: Boolean = false,
+    @SerialName("suppress_reason") val suppressReason: String? = null,
+)
+
+@Serializable
+data class VisitRecordResult(
+    val recorded: Boolean = false,
+    val reason: String? = null,
+    val visit: ShoppingVisit? = null,
+    val prompt: VisitPrompt? = null,
+    val notify: Boolean = false,
+)
