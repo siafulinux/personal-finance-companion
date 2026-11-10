@@ -5,6 +5,63 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+/**
+ * The server address an APK starts with, supplied at build time.
+ *
+ * Precedence: the `pfcApiBaseUrl` Gradle property, then the `PFC_API_BASE_URL`
+ * environment variable, then the emulator default. Whatever the user later enters in
+ * Settings → Server address is stored and wins over this, so this is only the first-run
+ * default.
+ *
+ *   ./gradlew assembleDebug -PpfcApiBaseUrl=https://finance.example.com
+ *   PFC_API_BASE_URL=https://finance.example.com ./gradlew assembleRelease
+ *
+ * The value is normalised rather than pasted in verbatim: a bare host gets https://, and
+ * the `/api/v1/` path the app talks to is appended when it is missing, so a build can be
+ * pointed at `finance.example.com:8443` and still produce a working client. A value that
+ * is not a usable address fails the build instead of shipping an APK that cannot connect.
+ */
+val defaultApiBaseUrl: String = run {
+    val raw = (project.findProperty("pfcApiBaseUrl") as String?)
+        ?: System.getenv("PFC_API_BASE_URL")
+        ?: "https://10.0.2.2:8443/api/v1/"
+    val cleaned = raw.trim().trimEnd('/')
+
+    fun rejected(why: String): Nothing = throw GradleException(
+        "pfcApiBaseUrl/PFC_API_BASE_URL is not a usable server address ($why): '$raw'\n" +
+            "Use an origin such as https://finance.example.com, or the full API root " +
+            "https://finance.example.com/api/v1/."
+    )
+
+    if (cleaned.isEmpty()) rejected("empty")
+    if (cleaned.contains(' ')) rejected("it contains a space")
+
+    val hasScheme = cleaned.startsWith("https://", ignoreCase = true) ||
+        cleaned.startsWith("http://", ignoreCase = true)
+    val scheme = when {
+        cleaned.startsWith("https://", ignoreCase = true) -> "https://"
+        cleaned.startsWith("http://", ignoreCase = true) -> "http://"
+        cleaned.contains("://") -> rejected("only http:// and https:// are supported")
+        // The common case: somebody types the host they use in a browser.
+        else -> "https://"
+    }
+    val rest = if (hasScheme) cleaned.substring(scheme.length) else cleaned
+    if (rest.isEmpty()) rejected("it has no host")
+    if (rest.contains('?') || rest.contains('#')) rejected("remove the query string and #fragment")
+    if (rest.contains('@')) rejected("remove the username and password from the address")
+
+    val authority = rest.substringBefore('/')
+    if (authority.isEmpty()) rejected("it has no host")
+
+    val path = rest.substringAfter('/', "").trimEnd('/')
+    if (path.isNotEmpty() && path != "api/v1") {
+        rejected("the path must be empty or /api/v1, not '/$path'")
+    }
+
+    // ServerUrl always stores the API root, so the baked-in default matches it.
+    "$scheme$authority/api/v1/"
+}
+
 android {
     namespace = "com.pfc.companion"
     compileSdk = 36
@@ -32,10 +89,11 @@ android {
         versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
-        // goes through the Caddy TLS front (port 8443). Change it in Settings for
-        // a physical device, using the host's LAN address and the same port.
-        buildConfigField("String", "API_BASE_URL", "\"https://10.0.2.2:8443/api/v1/\"")
+        // First-run default only; Settings → Server address overrides it per install.
+        // Defaults to 10.0.2.2:8443 (the emulator's view of this machine through the
+        // Caddy TLS front) and is replaced at build time by pfcApiBaseUrl or
+        // PFC_API_BASE_URL — see defaultApiBaseUrl above.
+        buildConfigField("String", "API_BASE_URL", "\"$defaultApiBaseUrl\"")
         // The API generation this build speaks. A server reporting a lower
         // /server/info api_version is too old to connect to.
         buildConfigField("int", "CLIENT_API_VERSION", "1")

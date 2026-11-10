@@ -116,8 +116,20 @@ Compose screen → ViewModel → FinanceRepository → ApiClient (OkHttp)
 - The ledger, accounts, bills and budgets are fetched on demand; there is no separate
   financial cache that could disagree with the web app.
 - The base URL is whatever server the user saved; the build only supplies a first-launch
-  default (`https://10.0.2.2:8443/api/v1/`, the emulator's view of the host). Pointing the
-  app at another installation requires no rebuild — see `docs/android-server-connection.md`.
+  default, `https://10.0.2.2:8443/api/v1/` (the emulator's view of the host) unless it is
+  set at build time:
+
+  ```bash
+  ./gradlew assembleDebug  -PpfcApiBaseUrl=https://finance.example.com
+  PFC_API_BASE_URL=https://finance.example.com ./gradlew assembleRelease
+  ```
+
+  The property wins over the environment variable, which wins over the emulator default.
+  A bare host gets `https://`, and `/api/v1/` is appended if absent, so
+  `-PpfcApiBaseUrl=finance.example.com:8443` works. A value that is not a usable address
+  fails the build rather than producing an APK that cannot connect. Pointing an installed
+  app at another installation still needs no rebuild — see
+  `docs/android-server-connection.md`.
 - The session token lives in `SecureTokenStore`: encrypted with an AES/GCM key held by the
   Android Keystore, never in plain preferences. It is stored per server, so switching
   addresses never carries a token across. Only the server URL and theme stay in DataStore.
