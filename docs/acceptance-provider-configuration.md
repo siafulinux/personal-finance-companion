@@ -183,7 +183,12 @@ them.
 1. **No live Teller call has succeeded from this machine.** `api.teller.io` is unreachable
    here (DNS/connect), so Teller end-to-end linking and syncing against the real sandbox is
    unverified. The adapter is covered by contract tests and its failure path was exercised
-   live. Plaid's API *is* reachable and rejected a deliberately fake client id correctly.
+   live. A harness for a host that *can* reach Teller now exists —
+   `backend/scripts/verify_teller_live.py`, documented in
+   `docs/financial-provider-administration.md` §5.1 — and it needs a sandbox access token
+   captured from Teller Connect, which no script can mint. Its preflight was run inside the
+   deployment container: it reported `network_error`, created nothing and exited 2. Plaid's
+   API *is* reachable and rejected a deliberately fake client id correctly.
 2. **No real Plaid credentials**, so no Plaid Item was created and no Plaid sync ran against
    the real API. The existing Plaid contract and sync tests still pass.
 3. **Android has no connection-management screen.** The provider-independent flow is

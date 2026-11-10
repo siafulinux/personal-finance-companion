@@ -171,6 +171,43 @@ curl -s -X POST -H "Authorization: Bearer $PFC_TOKEN" \
   http://127.0.0.1:8088/api/v1/server/providers/teller/test | jq
 ```
 
+### 5.1 Proving a real Teller enrolment end to end (sandbox)
+
+**Test connection** calls Teller's public directory. `backend/scripts/verify_teller_live.py`
+goes further and drives the same service functions the HTTP API uses against
+`https://api.teller.io`: enrolment accepted → first sync → second sync (must add nothing)
+→ balances compared with what Teller reports → disconnect (revoked at Teller, imported
+rows deleted) → the revoked token rejected by Teller.
+
+Teller has **no server-side token exchange**, so the script cannot mint a credential: its
+access token is produced by Teller Connect in the browser. Capture one from a sandbox
+enrolment and pass it in. Everything after that is the server's own path, including the
+nonce the adapter issues for Teller Connect and the encrypted-token storage check.
+
+```bash
+docker compose exec \
+  -e TELLER_SANDBOX_ACCESS_TOKEN=<token from a sandbox Teller Connect enrolment> \
+  api python scripts/verify_teller_live.py
+```
+
+What it needs:
+
+* **Teller configured for `sandbox`** — it refuses to run against development or production,
+  because it creates and revokes an enrolment.
+* **An application ID** from the Providers screen (or `TELLER_APPLICATION_ID`). The token
+  alone is not enough: Teller's client is opened with that id, and the adapter reports the
+  configuration source it used.
+* **A network that reaches `api.teller.io` on port 443.** The script's first step fetches
+  the public institution directory; if that fails it exits **2** with `network_error`,
+  creates nothing and never sends the token. That is a network verdict, not a judgement on
+  the adapter — run it from a host whose egress reaches Teller.
+
+Exit codes are `0` verified, `2` not configured or unreachable, `3` wrong environment and
+`4` a step failed. Evidence (counts, statuses, error codes, a token *prefix only*) is
+written to `logs/teller-live/<timestamp>.json`. The ephemeral test user, its accounts and
+its transactions are deleted at the end; `--keep-user` keeps them for inspection. Real
+bank credentials are never used, and nothing here runs in automated tests.
+
 ---
 
 ## 6. Rotating and disabling
