@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import { formatDate, formatMoney } from "../lib/format";
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorBanner,
@@ -25,6 +26,23 @@ export function InsightsPage() {
   const insightsQuery = useQuery({
     queryKey: ["personal-insights"],
     queryFn: api.personal.insights,
+  });
+
+  const merchantsQuery = useQuery({
+    queryKey: ["merchant-insights"],
+    queryFn: () => api.merchants.list(90),
+  });
+
+  const dismissFinding = useMutation({
+    mutationFn: (key: string) => api.merchants.dismiss(key),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["merchant-insights"] }),
+    onError: (err) => setError(err instanceof Error ? err.message : "Could not dismiss that."),
+  });
+
+  const restoreFinding = useMutation({
+    mutationFn: (key: string) => api.merchants.restore(key),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["merchant-insights"] }),
+    onError: (err) => setError(err instanceof Error ? err.message : "Could not restore that."),
   });
 
   const updatePrefs = useMutation({
@@ -139,6 +157,81 @@ export function InsightsPage() {
             ))}
           </div>
         )}
+      </Card>
+
+      <Card>
+        <div className="card__title">
+          <div>
+            <h2 style={{ fontSize: "1.05rem" }}>Merchant spending</h2>
+            <p className="tiny muted">
+              The last {merchantsQuery.data?.window_days ?? 90} days, grouped by normalised
+              merchant name. Patterns need {merchantsQuery.data?.minimum_history.months ?? 3}{" "}
+              months and {merchantsQuery.data?.minimum_history.transactions ?? 5} purchases before
+              they are stated.
+            </p>
+          </div>
+        </div>
+
+        {merchantsQuery.isLoading ? (
+          <LoadingBlock label="Grouping your purchases" />
+        ) : merchantsQuery.data && merchantsQuery.data.findings.length ? (
+          <div className="page-stack" style={{ gap: "0.6rem", marginTop: "0.6rem" }}>
+            {merchantsQuery.data.findings.map((finding) => (
+              <div key={finding.key} className="list-row" style={{ alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                    <Badge tone={SEVERITY_TONE[finding.severity]}>{finding.severity}</Badge>
+                    <strong>{finding.title}</strong>
+                  </div>
+                  <p className="tiny" style={{ marginTop: "0.2rem" }}>{finding.message}</p>
+                  <div className="tiny muted mono">
+                    {Object.entries(finding.evidence)
+                      .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => dismissFinding.mutate(finding.key)}>
+                  Dismiss
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="small muted" style={{ marginTop: "0.6rem" }}>
+            No merchant pattern is strong enough to report yet.
+          </p>
+        )}
+
+        {merchantsQuery.data?.merchants.length ? (
+          <ul className="mini-list" style={{ marginTop: "0.8rem" }}>
+            {merchantsQuery.data.merchants.slice(0, 8).map((row) => (
+              <li key={row.merchant_key}>
+                <div className="mini-list__main">
+                  <strong>{row.merchant}</strong>
+                  <span>
+                    {row.transaction_count} purchase(s) · {row.months_observed} month(s) ·{" "}
+                    {row.has_enough_history ? `${row.confidence} confidence` : "not enough history"}
+                    {row.category_name ? ` · ${row.category_name}` : ""}
+                  </span>
+                </div>
+                <span className="mini-list__amount">{formatMoney(row.total)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {merchantsQuery.data?.dismissed.length ? (
+          <div style={{ marginTop: "0.7rem" }}>
+            <p className="eyebrow">Dismissed</p>
+            <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+              {merchantsQuery.data.dismissed.map((key) => (
+                <Button key={key} size="sm" variant="ghost" onClick={() => restoreFinding.mutate(key)}>
+                  Restore {key.split(":")[0]}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </Card>
 
       <p className="tiny muted">

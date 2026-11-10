@@ -26,6 +26,7 @@ interface AccountForm {
   opening_balance: string;
   opening_balance_date: string;
   credit_limit: string;
+  minimum_payment: string;
   description: string;
   include_in_safe_to_spend: boolean;
 }
@@ -36,6 +37,7 @@ const emptyForm = (): AccountForm => ({
   opening_balance: "0.00",
   opening_balance_date: todayISO(),
   credit_limit: "",
+  minimum_payment: "",
   description: "",
   include_in_safe_to_spend: true,
 });
@@ -73,6 +75,7 @@ export function AccountsPage() {
           name: payload.name,
           account_type: payload.account_type,
           credit_limit: payload.credit_limit ? payload.credit_limit : null,
+          minimum_payment: payload.minimum_payment ? payload.minimum_payment : null,
           description: payload.description || null,
           include_in_safe_to_spend:
             payload.account_type === "credit_card" ? false : payload.include_in_safe_to_spend,
@@ -85,6 +88,7 @@ export function AccountsPage() {
         opening_balance_date: payload.opening_balance_date,
         currency: "USD",
         credit_limit: payload.credit_limit ? payload.credit_limit : null,
+        minimum_payment: payload.minimum_payment ? payload.minimum_payment : null,
         description: payload.description || null,
         include_in_safe_to_spend:
           payload.account_type === "credit_card" ? false : payload.include_in_safe_to_spend,
@@ -149,6 +153,7 @@ export function AccountsPage() {
       opening_balance: account.opening_balance,
       opening_balance_date: account.opening_balance_date,
       credit_limit: account.credit_limit ?? "",
+      minimum_payment: account.minimum_payment ?? "",
       description: account.description ?? "",
       include_in_safe_to_spend: account.include_in_safe_to_spend,
     });
@@ -395,18 +400,33 @@ export function AccountsPage() {
               </>
             ) : null}
             {form.account_type === "credit_card" ? (
-              <Field
-                label="Credit limit (reference only)"
-                hint="Limits are never treated as available cash."
-                htmlFor="acct-limit"
-              >
-                <Input
-                  id="acct-limit"
-                  inputMode="decimal"
-                  value={form.credit_limit}
-                  onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
-                />
-              </Field>
+              <>
+                <Field
+                  label="Credit limit (reference only)"
+                  hint="Limits are never treated as available cash."
+                  htmlFor="acct-limit"
+                >
+                  <Input
+                    id="acct-limit"
+                    inputMode="decimal"
+                    value={form.credit_limit}
+                    onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
+                  />
+                </Field>
+                <Field
+                  label="Minimum payment (optional)"
+                  hint="Reserved in Safe-to-Spend and shown in Obligations. Never guessed from the balance."
+                  htmlFor="acct-minimum"
+                >
+                  <Input
+                    id="acct-minimum"
+                    inputMode="decimal"
+                    value={form.minimum_payment}
+                    onChange={(e) => setForm({ ...form, minimum_payment: e.target.value })}
+                    placeholder="35.00"
+                  />
+                </Field>
+              </>
             ) : null}
           </div>
           <Field label="Notes (optional)" htmlFor="acct-desc">

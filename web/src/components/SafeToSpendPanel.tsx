@@ -50,6 +50,21 @@ export function SafeToSpendPanel({
         <span>
           Bills reserved <strong>-{formatMoney(data.bill_reserves)}</strong>
         </span>
+        {Number(data.loan_reserves ?? 0) > 0 ? (
+          <span>
+            Loan repayments <strong>-{formatMoney(data.loan_reserves ?? "0")}</strong>
+          </span>
+        ) : null}
+        {Number(data.credit_card_reserves ?? 0) > 0 ? (
+          <span>
+            Card minimums <strong>-{formatMoney(data.credit_card_reserves ?? "0")}</strong>
+          </span>
+        ) : null}
+        {Number(data.savings_reserves ?? 0) > 0 ? (
+          <span>
+            Savings goals <strong>-{formatMoney(data.savings_reserves ?? "0")}</strong>
+          </span>
+        ) : null}
         <span>
           Buffer <strong>-{formatMoney(data.minimum_buffer)}</strong>
         </span>
@@ -111,6 +126,16 @@ export function SafeToSpendPanel({
                 </span>
                 <span>
                   Bills reserved: <strong>{data.bills.length}</strong>
+                </span>
+                <span>
+                  Loan instalments: <strong>{data.loans?.length ?? 0}</strong>
+                </span>
+                <span>
+                  Savings goals protected: <strong>{data.savings?.length ?? 0}</strong>
+                </span>
+                <span>
+                  Obligations reserved:{" "}
+                  <strong>{formatMoney(data.obligations_total ?? data.bill_reserves)}</strong>
                 </span>
                 {data.stale_information ? (
                   <Badge tone="warning">Balances may be stale</Badge>

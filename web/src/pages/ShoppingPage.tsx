@@ -15,6 +15,7 @@ import {
   Warnings,
 } from "../components/ui";
 import { SafeToSpendPanel } from "../components/SafeToSpendPanel";
+import { ShoppingIntelligence } from "../components/ShoppingIntelligence";
 
 export function ShoppingPage() {
   const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: () => api.categories.list(false) });
@@ -276,13 +277,15 @@ export function ShoppingPage() {
                 </span>
               </div>
               <p className="tiny muted" style={{ marginTop: "0.6rem" }}>
-                Location-based reminders arrive with the Android phase. Phase 1 never requests or
-                stores GPS data; this screen works anywhere.
+                Location features live in the Android app and are opt-in. This screen works
+                anywhere, and no browser reads your position.
               </p>
             </Card>
           ) : null}
         </div>
       </div>
+
+      <ShoppingIntelligence />
     </div>
   );
 }

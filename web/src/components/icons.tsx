@@ -16,6 +16,16 @@ export function ConnectionsIcon() {
   );
 }
 
+export function ProvidersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
+      <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" />
+      <path d="M12 11.5v8.5" />
+      <path d="M4 8.5 12 13l8-4.5" />
+    </svg>
+  );
+}
+
 export function ServerIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" {...common}>
@@ -170,6 +180,33 @@ export function MonitorIcon() {
     <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" {...common}>
       <rect x="3" y="4" width="18" height="12" rx="1.6" />
       <path d="M8 20h8M12 16v4" />
+    </svg>
+  );
+}
+
+export function LoansIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" {...common}>
+      <path d="M3 7h18v10H3z" />
+      <path d="M7 12h4M15 10.5v3" />
+    </svg>
+  );
+}
+
+export function SavingsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" {...common}>
+      <path d="M4 12a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-3l-2-2H8l-2 2H5a1 1 0 0 1-1-1z" />
+      <path d="M9 10h.01M15 10h.01M12 7v1" />
+    </svg>
+  );
+}
+
+export function ObligationsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" {...common}>
+      <path d="M6 3h9l4 4v14H6z" />
+      <path d="M9 12h7M9 16h5M9 8h3" />
     </svg>
   );
 }

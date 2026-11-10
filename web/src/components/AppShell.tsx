@@ -1,6 +1,9 @@
+import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
+import { api } from "../lib/api";
 import {
   AccountsIcon,
   AssistantIcon,
@@ -10,8 +13,12 @@ import {
   ConnectionsIcon,
   DashboardIcon,
   InsightsIcon,
+  LoansIcon,
   MoonIcon,
+  ObligationsIcon,
+  ProvidersIcon,
   ReviewIcon,
+  SavingsIcon,
   ServerIcon,
   SettingsIcon,
   ShoppingIcon,
@@ -20,12 +27,17 @@ import {
 } from "./icons";
 import { Button } from "./ui";
 
-const NAV = [
+type NavItem = { to: string; label: string; icon: ReactNode; end?: boolean };
+
+const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: <DashboardIcon />, end: true },
   { to: "/accounts", label: "Accounts", icon: <AccountsIcon /> },
   { to: "/transactions", label: "Transactions", icon: <TransactionsIcon /> },
   { to: "/budgets", label: "Budgets", icon: <BudgetsIcon /> },
   { to: "/bills", label: "Bills", icon: <BillsIcon /> },
+  { to: "/obligations", label: "Obligations", icon: <ObligationsIcon /> },
+  { to: "/loans", label: "Loans", icon: <LoansIcon /> },
+  { to: "/savings", label: "Savings", icon: <SavingsIcon /> },
   { to: "/calendar", label: "Calendar", icon: <CalendarIcon /> },
   { to: "/shopping", label: "Shopping", icon: <ShoppingIcon /> },
   { to: "/connections", label: "Connections", icon: <ConnectionsIcon /> },
@@ -36,10 +48,23 @@ const NAV = [
   { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 
+// Only the account created by the first-run wizard may configure providers, so the
+// navigation entry is rendered only for it. The API enforces the same rule.
+const ADMIN_NAV: NavItem = {
+  to: "/server/providers",
+  label: "Providers",
+  icon: <ProvidersIcon />,
+  end: false,
+};
+
 export function AppShell() {
   const { profile, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  // Shares the cache with the Server page: this is not an extra request on navigation.
+  const settings = useQuery({ queryKey: ["server-settings"], queryFn: api.server.settings });
+  const isAdmin = settings.data?.settings.is_admin === true;
+  const nav = isAdmin ? [...NAV, ADMIN_NAV] : NAV;
 
   const today = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -68,7 +93,7 @@ export function AppShell() {
 
         <nav className="nav" aria-label="Main">
           <span className="nav__label">Workspace</span>
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

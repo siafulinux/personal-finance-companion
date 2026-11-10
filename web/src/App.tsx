@@ -13,10 +13,14 @@ import { CalendarPage } from "./pages/CalendarPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InsightsPage } from "./pages/InsightsPage";
+import { LoansPage } from "./pages/LoansPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ObligationsPage } from "./pages/ObligationsPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
+import { ProvidersPage } from "./pages/ProvidersPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { SavingsPage } from "./pages/SavingsPage";
 import { ServerPage } from "./pages/ServerPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -123,6 +127,9 @@ export function App() {
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/budgets" element={<BudgetsPage />} />
           <Route path="/bills" element={<BillsPage />} />
+          <Route path="/obligations" element={<ObligationsPage />} />
+          <Route path="/loans" element={<LoansPage />} />
+          <Route path="/savings" element={<SavingsPage />} />
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/shopping" element={<ShoppingPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
@@ -130,6 +137,7 @@ export function App() {
           <Route path="/insights" element={<InsightsPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/server" element={<ServerPage />} />
+          <Route path="/server/providers" element={<ProvidersPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>
