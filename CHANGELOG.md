@@ -8,7 +8,7 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
-## [Unreleased] — Phase 4: financial intelligence expansion
+## [0.6.0] — 2026-11-10 — Phase 4 financial intelligence
 
 The finance engine now sees the whole picture: what is borrowed, what is set aside, what is
 owed, and what a trip to a particular shop actually costs. Every authoritative figure stays
