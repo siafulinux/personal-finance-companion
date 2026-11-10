@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import {
+  ConnectCancelled,
+  openPlaidLink,
+  openTellerConnect,
+  tellerFinishPayload,
+} from "../lib/providerConnect";
 import { formatDate } from "../lib/format";
-import type { ProviderLink, SyncRunSummary } from "../lib/types";
+import type {
+  ConnectFlow,
+  InstitutionEntry,
+  ProviderLink,
+  SyncRunSummary,
+} from "../lib/types";
 import {
   Badge,
   Button,
@@ -10,8 +21,12 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorBanner,
+  Field,
+  Input,
   LoadingBlock,
+  Modal,
   PageHeader,
+  Warnings,
 } from "../components/ui";
 
 function statusTone(status: ProviderLink["status"]) {
@@ -28,6 +43,16 @@ function statusLabel(link: ProviderLink) {
   return "Disconnected";
 }
 
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function asStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 function RunRow({ run }: { run: SyncRunSummary }) {
   const tone =
     run.status === "success" ? "positive" : run.status === "partial" ? "warning" : "danger";
@@ -35,7 +60,9 @@ function RunRow({ run }: { run: SyncRunSummary }) {
     <div className="list-row" style={{ alignItems: "flex-start", gap: "0.75rem" }}>
       <Badge tone={tone}>{run.status}</Badge>
       <div style={{ flex: 1 }}>
-        <div className="mono tiny">{formatDate(run.started_at, { dateStyle: "medium", timeStyle: "short" })}</div>
+        <div className="mono tiny">
+          {formatDate(run.started_at, { dateStyle: "medium", timeStyle: "short" })}
+        </div>
         <div className="tiny muted">
           +{run.added} added · ~{run.modified} updated · −{run.removed} removed
           {run.skipped_duplicates ? ` · ${run.skipped_duplicates} duplicates skipped` : ""}
@@ -53,9 +80,18 @@ function RunRow({ run }: { run: SyncRunSummary }) {
 
 export function ConnectionsPage() {
   const queryClient = useQueryClient();
-  const providersQuery = useQuery({
-    queryKey: ["providers"],
-    queryFn: api.connectivity.providers,
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+
+  // Typing should not fire a request per keystroke; the directory is server-side.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const catalogQuery = useQuery({
+    queryKey: ["institution-catalog", query],
+    queryFn: () => api.connectivity.catalog(query),
   });
   const linksQuery = useQuery({ queryKey: ["links"], queryFn: api.connectivity.links });
   const runsQuery = useQuery({
@@ -68,6 +104,11 @@ export function ConnectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const [selected, setSelected] = useState<InstitutionEntry | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["links"] });
     queryClient.invalidateQueries({ queryKey: ["sync-runs"] });
@@ -75,31 +116,80 @@ export function ConnectionsPage() {
     queryClient.invalidateQueries({ queryKey: ["accounts"] });
     queryClient.invalidateQueries({ queryKey: ["review"] });
     queryClient.invalidateQueries({ queryKey: ["suggestions"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
 
-  const connect = useMutation({
-    mutationFn: async (provider: string) => {
-      const token = await api.connectivity.linkToken(provider);
-      // The sandbox provider is a direct flow; a hosted provider would open its own
-      // window here and hand back a public token.
-      return api.connectivity.exchange({
-        provider: token.provider,
-        public_token: token.link_token,
-        consent: true,
+  const closeConnect = () => {
+    setSelected(null);
+    setConsent(false);
+    setConnectError(null);
+  };
+
+  const connect = async (entry: InstitutionEntry) => {
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const started: ConnectFlow = await api.connectivity.start({
+        institution_name: entry.name,
+        institution_key: entry.key,
       });
-    },
-    onSuccess: (result) => {
-      setError(null);
-      setNotice(
-        `${result.link.institution_name} connected. ${result.sync.added} transactions imported` +
-          (result.sync.skipped_duplicates
-            ? `, ${result.sync.skipped_duplicates} duplicates skipped.`
-            : ".")
-      );
-      refresh();
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : "Could not connect."),
-  });
+
+      type FinishExtra = {
+        public_token: string;
+        nonce?: string;
+        user_id?: string | null;
+        enrollment_id?: string | null;
+        signatures?: string[];
+      };
+
+      const complete = async (extra: FinishExtra) => {
+        const result = await api.connectivity.finish({
+          institution_name: entry.name,
+          institution_key: entry.key,
+          consent: true,
+          ...extra,
+        });
+        setNotice(
+          `${result.link.institution_name} connected. ${result.sync.added} transactions imported` +
+            (result.sync.skipped_duplicates
+              ? `, ${result.sync.skipped_duplicates} duplicates skipped.`
+              : ".")
+        );
+        refresh();
+        closeConnect();
+      };
+
+      if (started.mode === "direct") {
+        // A locally simulated institution approves immediately.
+        await complete({ public_token: asString(started.flow.link_token) });
+      } else if (started.mode === "teller_connect") {
+        const nonce = asString(started.flow.nonce);
+        const enrollment = await openTellerConnect({
+          applicationId: asString(started.flow.application_id),
+          environment: asString(started.flow.environment) || "sandbox",
+          products: asStringList(started.flow.products),
+          nonce,
+          institution: asString(started.flow.institution) || null,
+        });
+        await complete(tellerFinishPayload(enrollment, nonce));
+      } else if (started.mode === "plaid_link") {
+        const publicToken = await openPlaidLink(asString(started.flow.link_token));
+        await complete({ public_token: publicToken });
+      } else {
+        throw new Error("This server returned a connection flow this app does not recognise.");
+      }
+    } catch (err) {
+      if (err instanceof ConnectCancelled) {
+        setConnectError(null);
+      } else {
+        setConnectError(
+          err instanceof Error ? err.message : "Could not connect this institution."
+        );
+      }
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const sync = useMutation({
     mutationFn: ({ id, full }: { id: string; full: boolean }) =>
@@ -130,19 +220,20 @@ export function ConnectionsPage() {
     onError: (err) => setError(err instanceof Error ? err.message : "Could not disconnect."),
   });
 
-  if (providersQuery.isLoading || linksQuery.isLoading) {
+  if (linksQuery.isLoading) {
     return <LoadingBlock label="Loading connections" />;
   }
 
-  const providers = providersQuery.data?.providers ?? [];
   const links = linksQuery.data?.links ?? [];
+  const catalog = catalogQuery.data;
+  const institutions = catalog?.institutions ?? [];
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow="Connected data"
         title="Institutions"
-        description="Link an institution to bring its accounts and transactions into your ledger. Imported transactions are ordinary ledger rows: they feed the same balances, bills and Safe-to-Spend as manual entry."
+        description="Connect your bank or payment app to bring its accounts and transactions into your ledger. They become ordinary ledger rows: the same balances, bills and Safe-to-Spend apply."
       />
 
       {error ? <ErrorBanner message={error} onRetry={() => setError(null)} /> : null}
@@ -153,37 +244,77 @@ export function ConnectionsPage() {
       ) : null}
 
       <Card>
-        <h2 style={{ fontSize: "1.05rem", marginBottom: "0.25rem" }}>Available providers</h2>
+        <h2 style={{ fontSize: "1.05rem", marginBottom: "0.25rem" }}>Connect an institution</h2>
         <p className="tiny muted" style={{ marginBottom: "0.9rem" }}>
-          The sandbox institution is simulated and needs no bank credentials. It exists so the
-          whole pipeline can be exercised and reviewed safely.
+          Search for your bank, credit union or payment app. Your credentials are entered
+          directly with the institution's secure authorisation screen — this server never
+          sees your bank password.
         </p>
-        <div className="page-stack" style={{ gap: "0.6rem" }}>
-          {providers.map((provider) => (
-            <div
-              key={provider.name}
-              className="list-row"
-              style={{ alignItems: "center", gap: "0.75rem" }}
-            >
-              <div style={{ flex: 1 }}>
-                <strong>{provider.display_name}</strong>
-                <div className="tiny muted">{provider.note}</div>
-              </div>
-              {provider.simulated ? <Badge tone="info">Simulated</Badge> : null}
-              <Button
-                size="sm"
-                disabled={!provider.usable}
-                loading={connect.isPending && connect.variables === provider.name}
-                onClick={() => {
-                  setNotice(null);
-                  connect.mutate(provider.name);
-                }}
+
+        <Field label="Search institutions" htmlFor="institution-search">
+          <Input
+            id="institution-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="USAA, Chase, Cash App…"
+            autoComplete="off"
+          />
+        </Field>
+
+        {catalogQuery.isLoading ? (
+          <div className="tiny muted" style={{ marginTop: "0.9rem" }}>
+            Searching…
+          </div>
+        ) : catalogQuery.error ? (
+          <div className="tiny" style={{ marginTop: "0.9rem", color: "var(--danger)" }}>
+            {catalogQuery.error instanceof Error
+              ? catalogQuery.error.message
+              : "Could not load the institution list."}
+          </div>
+        ) : institutions.length === 0 ? (
+          <div className="tiny muted" style={{ marginTop: "0.9rem" }}>
+            {catalog?.configured
+              ? "No institution matches that search. You can still add the account manually or import a statement."
+              : "Financial connections are not set up on this server yet. Ask the administrator to finish the provider configuration — manual entry and statement import still work."}
+          </div>
+        ) : (
+          <div className="page-stack" style={{ gap: "0.6rem", marginTop: "0.9rem" }}>
+            {institutions.map((entry) => (
+              <div
+                key={entry.key}
+                className="list-row"
+                style={{ alignItems: "center", gap: "0.75rem" }}
               >
-                {provider.usable ? "Connect" : "Not configured"}
-              </Button>
-            </div>
-          ))}
-        </div>
+                <div style={{ flex: 1 }}>
+                  <strong>{entry.name}</strong>
+                  <div className="tiny muted">
+                    {entry.available
+                      ? entry.account_types.length
+                        ? `Shares ${entry.account_types.join(", ").replaceAll("_", " ")}`
+                        : "Ready to connect"
+                      : entry.reason ?? "Currently unavailable"}
+                  </div>
+                </div>
+                {entry.simulated ? <Badge tone="info">Demo</Badge> : null}
+                <Button
+                  size="sm"
+                  disabled={!entry.available}
+                  onClick={() => {
+                    setNotice(null);
+                    setConsent(false);
+                    setConnectError(null);
+                    setSelected(entry);
+                  }}
+                >
+                  {entry.available ? "Connect" : "Unavailable"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {catalog?.warnings?.length ? <Warnings items={catalog.warnings} /> : null}
       </Card>
 
       <Card>
@@ -191,7 +322,7 @@ export function ConnectionsPage() {
         {links.length === 0 ? (
           <EmptyState
             title="Nothing connected yet"
-            description="Connect a provider above to import accounts and transactions."
+            description="Connect an institution above to import its accounts and transactions, or keep adding them manually."
           />
         ) : (
           <div className="page-stack" style={{ gap: "1rem" }}>
@@ -202,7 +333,6 @@ export function ConnectionsPage() {
                     <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                       <strong>{link.institution_name}</strong>
                       <Badge tone={statusTone(link.status)}>{statusLabel(link)}</Badge>
-                      <Badge tone="neutral">{link.provider}</Badge>
                     </div>
                     <div className="tiny muted">
                       {link.account_count} accounts · last synced{" "}
@@ -212,7 +342,12 @@ export function ConnectionsPage() {
                             timeStyle: "short",
                           })
                         : "never"}
-                      {link.next_retry_at ? ` · next retry ${formatDate(link.next_retry_at, { dateStyle: "medium", timeStyle: "short" })}` : ""}
+                      {link.next_retry_at
+                        ? ` · next retry ${formatDate(link.next_retry_at, {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          })}`
+                        : ""}
                     </div>
                     {link.error_message ? (
                       <div className="tiny" style={{ color: "var(--danger)" }}>
@@ -249,6 +384,11 @@ export function ConnectionsPage() {
                     Disconnect
                   </Button>
                 </div>
+                {link.status === "reauth_required" ? (
+                  <p className="tiny" style={{ margin: 0 }}>
+                    The institution needs you to sign in again before data can be refreshed.
+                  </p>
+                ) : null}
                 {link.last_run ? <RunRow run={link.last_run} /> : null}
               </div>
             ))}
@@ -268,6 +408,52 @@ export function ConnectionsPage() {
           </div>
         )}
       </Card>
+
+      <Modal
+        open={selected !== null}
+        title={selected ? `Connect ${selected.name}` : "Connect institution"}
+        description="You will approve the request on the institution's own secure screen."
+        onClose={closeConnect}
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeConnect} disabled={connecting}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!consent || connecting}
+              loading={connecting}
+              onClick={() => selected && void connect(selected)}
+            >
+              {connecting ? "Connecting…" : "Authorise and connect"}
+            </Button>
+          </>
+        }
+      >
+        <div className="page-stack" style={{ gap: "0.9rem" }}>
+          <p className="tiny" style={{ margin: 0 }}>
+            This server will retrieve the accounts you select and their transaction history
+            from <strong>{selected?.name}</strong>, and keep them in sync until you disconnect.
+            You can disconnect at any time and optionally delete the imported data.
+          </p>
+          {selected?.simulated ? (
+            <p className="tiny muted" style={{ margin: 0 }}>
+              This is a simulated institution for trying the flow. It holds no real accounts.
+            </p>
+          ) : null}
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(event) => setConsent(event.target.checked)}
+            />
+            <span>
+              I authorise this server to access my account and transaction data at{" "}
+              {selected?.name}.
+            </span>
+          </label>
+          {connectError ? <ErrorBanner message={connectError} /> : null}
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={pendingUnlink !== null}

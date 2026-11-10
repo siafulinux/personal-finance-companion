@@ -15,7 +15,7 @@ x-logging: &default-logging
       max-file: "3"
 
 x-api: &api
-  image: pfc-api:${PFC_IMAGE_TAG:-2.0.0}
+  image: pfc-api:${PFC_IMAGE_TAG:-2.1.0}
   build:
     context: ../..
     dockerfile: deploy/docker/Dockerfile.api
@@ -75,9 +75,20 @@ services:
       DEFAULT_TIMEZONE: ${APP_TIMEZONE:-UTC}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PROVIDER_ENCRYPTION_KEY: ${PROVIDER_ENCRYPTION_KEY:-}
+      # Financial connectivity. Teller is primary; Plaid is the fallback. Both can
+      # also be configured on the admin screen, which takes precedence.
       PLAID_CLIENT_ID: ${PLAID_CLIENT_ID:-}
       PLAID_SECRET: ${PLAID_SECRET:-}
       PLAID_ENVIRONMENT: ${PLAID_ENVIRONMENT:-sandbox}
+      PLAID_PROVIDER_ENABLED: ${PLAID_PROVIDER_ENABLED:-true}
+      TELLER_APPLICATION_ID: ${TELLER_APPLICATION_ID:-}
+      TELLER_ENVIRONMENT: ${TELLER_ENVIRONMENT:-sandbox}
+      TELLER_CERTIFICATE: ${TELLER_CERTIFICATE:-}
+      TELLER_PRIVATE_KEY: ${TELLER_PRIVATE_KEY:-}
+      TELLER_SIGNING_KEY: ${TELLER_SIGNING_KEY:-}
+      TELLER_PROVIDER_ENABLED: ${TELLER_PROVIDER_ENABLED:-true}
+      PROVIDER_AUTO_SELECT: ${PROVIDER_AUTO_SELECT:-true}
+      SANDBOX_PROVIDER_ENABLED: ${SANDBOX_PROVIDER_ENABLED:-true}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
       interval: 15s
@@ -100,6 +111,15 @@ services:
       PLAID_CLIENT_ID: ${PLAID_CLIENT_ID:-}
       PLAID_SECRET: ${PLAID_SECRET:-}
       PLAID_ENVIRONMENT: ${PLAID_ENVIRONMENT:-sandbox}
+      PLAID_PROVIDER_ENABLED: ${PLAID_PROVIDER_ENABLED:-true}
+      TELLER_APPLICATION_ID: ${TELLER_APPLICATION_ID:-}
+      TELLER_ENVIRONMENT: ${TELLER_ENVIRONMENT:-sandbox}
+      TELLER_CERTIFICATE: ${TELLER_CERTIFICATE:-}
+      TELLER_PRIVATE_KEY: ${TELLER_PRIVATE_KEY:-}
+      TELLER_SIGNING_KEY: ${TELLER_SIGNING_KEY:-}
+      TELLER_PROVIDER_ENABLED: ${TELLER_PROVIDER_ENABLED:-true}
+      PROVIDER_AUTO_SELECT: ${PROVIDER_AUTO_SELECT:-true}
+      SANDBOX_PROVIDER_ENABLED: ${SANDBOX_PROVIDER_ENABLED:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       RUN_MIGRATIONS: "false"
       WORKER_SYNC_INTERVAL_SECONDS: ${WORKER_SYNC_INTERVAL_SECONDS:-300}
@@ -117,7 +137,7 @@ services:
       start_period: 90s
 
   web:
-    image: pfc-web:${PFC_IMAGE_TAG:-2.0.0}
+    image: pfc-web:${PFC_IMAGE_TAG:-2.1.0}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.web

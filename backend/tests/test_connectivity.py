@@ -14,6 +14,7 @@ from app.providers.base import ProviderError
 from app.providers.registry import get_adapter
 from app.providers.sandbox import advance, reset_state
 from app.security.secrets import decrypt_text
+from app.services import sync as sync_module
 from app.services.sync import (
     connect_institution,
     disconnect_link,
@@ -188,6 +189,9 @@ def test_failed_sync_is_recorded_and_backed_off(db, user, monkeypatch):
     def boom(access_token, cursor, count=100):
         raise ProviderError("Provider is down.", code="provider_unavailable", retryable=True)
 
+    # sync builds its adapter from the saved provider configuration now, so the
+    # failure is injected at that seam rather than on a cached singleton.
+    monkeypatch.setattr(sync_module, "adapter_for", lambda _db, _name: adapter)
     monkeypatch.setattr(adapter, "sync_page", boom)
     run = sync_link(db, user, link)
 
@@ -226,6 +230,7 @@ def test_reauth_required_stops_retrying(db, user, monkeypatch):
             "Reconnect the institution.", code="ITEM_LOGIN_REQUIRED", requires_reauth=True
         )
 
+    monkeypatch.setattr(sync_module, "adapter_for", lambda _db, _name: adapter)
     monkeypatch.setattr(adapter, "sync_page", needs_login)
     run = sync_link(db, user, link)
     db.refresh(link)

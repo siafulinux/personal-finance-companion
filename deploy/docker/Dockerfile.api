@@ -18,6 +18,9 @@ WORKDIR /app
 # Dependencies first, so editing application code does not reinstall the world.
 COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/app ./app
+# Verification tools that must see the deployment's own database and provider
+# configuration (scripts/verify_plaid_live.py drives the live sandbox check).
+COPY backend/scripts ./scripts
 COPY backend/migrations ./migrations
 COPY backend/alembic.ini ./alembic.ini
 

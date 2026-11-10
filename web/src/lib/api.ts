@@ -23,16 +23,34 @@ import type {
   AssistantAnswer,
   AssistantStatus,
   CategorySuggestionItem,
+  ConnectFlow,
+  ConnectResult,
+  CoverageReport,
+  InstitutionCatalog,
   LinkedAccountRef,
   PersonalInsights,
+  ProviderAdmin,
   ProviderInfo,
   ProviderLink,
+  ProviderOverview,
   RecurringItem,
   SyncRunSummary,
   Transaction,
   TransactionPage,
   UploadResponse,
   User,
+  Loan,
+  LoanPayment,
+  LoanPaymentSuggestion,
+  LoanSummary,
+  LocationSettings,
+  MerchantInsights,
+  Obligations,
+  Recommendations,
+  SavingsGoal,
+  SavingsSummary,
+  ShoppingVisits,
+  TrackedLocation,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
@@ -340,6 +358,28 @@ export const api = {
   },
 
   connectivity: {
+    // The institution-first flow: users browse institutions, never providers.
+    catalog: (query?: string) =>
+      request<InstitutionCatalog>("/connectivity/catalog", { query: { query } }),
+    start: (body: { institution_name: string; institution_key?: string | null }) =>
+      request<ConnectFlow>("/connectivity/connect/start", {
+        method: "POST",
+        body: json(body),
+      }),
+    finish: (body: {
+      institution_name: string;
+      institution_key?: string | null;
+      public_token: string;
+      consent: boolean;
+      nonce?: string | null;
+      user_id?: string | null;
+      enrollment_id?: string | null;
+      signatures?: string[] | null;
+    }) =>
+      request<ConnectResult>("/connectivity/connect/finish", {
+        method: "POST",
+        body: json(body),
+      }),
     providers: () => request<{ providers: ProviderInfo[] }>("/connectivity/providers"),
     linkToken: (provider: string) =>
       request<{ provider: string; link_token: string; mode: string; note?: string }>(
@@ -367,6 +407,41 @@ export const api = {
       }>(`/connectivity/links/${linkId}`, { method: "DELETE", query: { delete_data: deleteData } }),
     syncRuns: (limit = 20) =>
       request<{ runs: SyncRunSummary[] }>("/connectivity/sync-runs", { query: { limit } }),
+  },
+
+  // Administrator-only: configuration and credentials for the aggregators.
+  providerAdmin: {
+    overview: () => request<ProviderOverview>("/server/providers"),
+    update: (
+      name: string,
+      body: {
+        enabled?: boolean;
+        priority?: number;
+        environment?: string;
+        credentials?: Record<string, string>;
+      }
+    ) =>
+      request<ProviderAdmin>(`/server/providers/${name}`, {
+        method: "PATCH",
+        body: json(body),
+      }),
+    test: (name: string) =>
+      request<{
+        ok: boolean;
+        message: string;
+        code?: string;
+        detail?: Record<string, unknown>;
+        provider: ProviderAdmin;
+      }>(`/server/providers/${name}/test`, { method: "POST" }),
+    setSelection: (autoSelect: boolean) =>
+      request<{ auto_select: boolean }>("/server/providers/selection", {
+        method: "PATCH",
+        body: json({ auto_select: autoSelect }),
+      }),
+    coverage: (names: string[]) =>
+      request<CoverageReport>("/server/providers/coverage", {
+        query: { names: names.join(",") },
+      }),
   },
 
   review: {
@@ -425,6 +500,88 @@ export const api = {
         method: "POST",
         body: json({ consent }),
       }),
+  },
+
+  loans: {
+    list: () => request<LoanSummary>("/loans"),
+    create: (body: unknown) => request<Loan>("/loans", { method: "POST", body: json(body) }),
+    update: (id: string, body: unknown) =>
+      request<Loan>(`/loans/${id}`, { method: "PATCH", body: json(body) }),
+    remove: (id: string) => request<void>(`/loans/${id}`, { method: "DELETE" }),
+    payments: (id: string) => request<LoanPayment[]>(`/loans/${id}/payments`),
+    addPayment: (id: string, body: unknown) =>
+      request<LoanPayment>(`/loans/${id}/payments`, { method: "POST", body: json(body) }),
+    confirmPayment: (id: string, paymentId: string) =>
+      request<LoanPayment>(`/loans/${id}/payments/${paymentId}/confirm`, { method: "POST" }),
+    rejectPayment: (id: string, paymentId: string) =>
+      request<LoanPayment>(`/loans/${id}/payments/${paymentId}/reject`, { method: "POST" }),
+    removePayment: (id: string, paymentId: string) =>
+      request<void>(`/loans/${id}/payments/${paymentId}`, { method: "DELETE" }),
+    suggestions: (id: string) =>
+      request<{ loan_id: string; loan_name: string; items: LoanPaymentSuggestion[] }>(
+        `/loans/${id}/suggestions`,
+      ),
+    acceptSuggestion: (id: string, transactionId: string) =>
+      request<LoanPayment>(`/loans/${id}/suggestions/${transactionId}`, { method: "POST" }),
+  },
+
+  savings: {
+    list: () => request<SavingsSummary>("/savings"),
+    create: (body: unknown) =>
+      request<SavingsGoal>("/savings", { method: "POST", body: json(body) }),
+    update: (id: string, body: unknown) =>
+      request<SavingsGoal>(`/savings/${id}`, { method: "PATCH", body: json(body) }),
+    remove: (id: string) => request<void>(`/savings/${id}`, { method: "DELETE" }),
+    contribute: (id: string, body: unknown) =>
+      request<SavingsGoal>(`/savings/${id}/contributions`, {
+        method: "POST",
+        body: json(body),
+      }),
+  },
+
+  obligations: {
+    list: (days = 45) => request<Obligations>("/obligations", { query: { days: String(days) } }),
+  },
+
+  recommendations: () => request<Recommendations>("/recommendations"),
+
+  merchants: {
+    list: (days = 90) =>
+      request<MerchantInsights>("/insights/merchants", { query: { days: String(days) } }),
+    dismiss: (key: string) =>
+      request<{ key: string; dismissed: boolean }>("/insights/merchants/dismiss", {
+        method: "POST",
+        body: json({ key }),
+      }),
+    restore: (key: string) =>
+      request<{ key: string; dismissed: boolean }>("/insights/merchants/restore", {
+        method: "POST",
+        body: json({ key }),
+      }),
+  },
+
+  locations: {
+    settings: () => request<LocationSettings>("/shopping/location-settings"),
+    updateSettings: (body: unknown) =>
+      request<LocationSettings>("/shopping/location-settings", {
+        method: "PATCH",
+        body: json(body),
+      }),
+    list: () => request<TrackedLocation[]>("/shopping/locations"),
+    create: (body: unknown) =>
+      request<TrackedLocation>("/shopping/locations", { method: "POST", body: json(body) }),
+    update: (id: string, body: unknown) =>
+      request<TrackedLocation>(`/shopping/locations/${id}`, {
+        method: "PATCH",
+        body: json(body),
+      }),
+    remove: (id: string) => request<void>(`/shopping/locations/${id}`, { method: "DELETE" }),
+    visits: () => request<ShoppingVisits>("/shopping/visits"),
+    ignoreVisit: (id: string) =>
+      request<unknown>(`/shopping/visits/${id}/ignore`, { method: "POST" }),
+    removeVisit: (id: string) =>
+      request<void>(`/shopping/visits/${id}`, { method: "DELETE" }),
+    clearVisits: () => request<{ deleted: number }>("/shopping/visits", { method: "DELETE" }),
   },
 
   income: {

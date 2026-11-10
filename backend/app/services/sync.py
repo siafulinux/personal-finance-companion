@@ -49,7 +49,7 @@ from app.providers.base import (
     ProviderTransactionData,
     TransactionDelta,
 )
-from app.providers.registry import get_adapter
+from app.providers.registry import adapter_for
 from app.schemas.finance import TransactionCreate
 from app.security.secrets import decrypt_text, encrypt_text, mask_token
 from app.services.balances import balances_for_accounts
@@ -445,7 +445,13 @@ def _apply_added_legs(
     for row, account in plain:
         existing = _find_provider_transaction(db, user.id, row.external_id)
         if existing is not None:
-            counts["skipped_duplicates"] += 1
+            # A window-based provider (Teller) re-reports the same id after it posts.
+            # Reconciling here is what stops a pending authorisation from staying
+            # pending forever when no "modified" event is ever sent.
+            if existing.status == TransactionStatus.PENDING.value and not row.pending:
+                _apply_pending_reconciliation(db, user, existing, row, account, counts)
+            else:
+                counts["skipped_duplicates"] += 1
             continue
         # A new posted row may be the posted form of a pending row we already hold.
         if row.pending_external_id:
@@ -728,7 +734,9 @@ def sync_link(
     db.flush()
 
     counts: Counter = Counter()
-    adapter = get_adapter(link.provider)
+    # Built from the administrator's saved credentials, so a rotated key applies here
+    # without a restart.
+    adapter = adapter_for(db, link.provider)
     try:
         if not adapter.is_configured():
             raise ProviderError(
@@ -819,17 +827,29 @@ def sync_link(
 
 
 def connect_institution(
-    db: Session, user: User, provider: str, public_token: str
+    db: Session,
+    user: User,
+    provider: str,
+    public_token: str,
+    *,
+    payload: dict[str, Any] | None = None,
 ) -> tuple[ProviderLink, list[FinancialAccount], SyncRun]:
-    """Complete a linking flow and run the first sync."""
-    adapter = get_adapter(provider)
+    """Complete a linking flow and run the first sync.
+
+    ``payload`` carries whatever else the provider's flow returned (Teller mints its token
+    in the client, so it also hands back the enrolment id and a signature to verify).
+    """
+    adapter = adapter_for(db, provider)
     if not adapter.is_configured():
         raise ProviderError(
             f"The {provider} provider is not configured on this server.",
             code="not_configured",
             retryable=False,
         )
-    result = adapter.complete_link(public_token)
+    enriched = dict(payload or {})
+    # Always verify a linking nonce against the signed-in user, whatever the caller sent.
+    enriched["expected_user_id"] = str(user.id)
+    result = adapter.complete_link(public_token, enriched)
     was_connected = False
 
     link = db.scalar(
@@ -882,7 +902,7 @@ def disconnect_link(
     db: Session, user: User, link: ProviderLink, *, delete_data: bool
 ) -> dict[str, Any]:
     """Unlink and, when asked, delete the data the institution brought in."""
-    adapter = get_adapter(link.provider)
+    adapter = adapter_for(db, link.provider)
     revoked = False
     try:
         token = token_for(link)

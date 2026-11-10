@@ -28,6 +28,7 @@ from app.providers.base import (
     ProviderAccountData,
     ProviderAdapter,
     ProviderError,
+    ProviderInstitution,
     ProviderTransactionData,
     TransactionDelta,
 )
@@ -219,7 +220,9 @@ class PlaidProvider(ProviderAdapter):
             ) from exc
 
     # --- contract -----------------------------------------------------------
-    def create_link_token(self, user_id: str) -> dict[str, object]:
+    def create_link_token(
+        self, user_id: str, institution_id: str | None = None
+    ) -> dict[str, object]:
         payload: dict[str, object] = {
             "user": {"client_user_id": user_id},
             "client_name": "Personal Finance Companion",
@@ -227,6 +230,9 @@ class PlaidProvider(ProviderAdapter):
             "country_codes": ["US"],
             "language": "en",
         }
+        if institution_id:
+            # The user already chose the institution in our own picker.
+            payload["institution_id"] = institution_id
         if settings.plaid_webhook_url:
             payload["webhook"] = settings.plaid_webhook_url
         data = self._post("/link/token/create", payload)
@@ -234,7 +240,7 @@ class PlaidProvider(ProviderAdapter):
             "provider": self.name,
             "link_token": data.get("link_token"),
             "expires_in": 1800,
-            "mode": "hosted",
+            "mode": "plaid_link",
             "environment": self.environment,
         }
 
@@ -272,7 +278,10 @@ class PlaidProvider(ProviderAdapter):
             )
         return str(public_token)
 
-    def complete_link(self, public_token: str) -> LinkResult:
+    def complete_link(
+        self, public_token: str, payload: dict | None = None
+    ) -> LinkResult:
+        """Exchange a Link public token. Plaid needs nothing beyond it."""
         data = self._post("/item/public_token/exchange", {"public_token": public_token})
         access_token = data.get("access_token")
         item_id = data.get("item_id")
@@ -362,3 +371,74 @@ class PlaidProvider(ProviderAdapter):
             if exc.code in {"ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"}:
                 return
             raise
+
+    # --- directory + health --------------------------------------------------
+    def list_institutions(self, query: str | None = None) -> list[ProviderInstitution]:
+        """Plaid's institution directory, filtered by name.
+
+        ``/institutions/search`` is used when a query is given, ``/institutions/get``
+        otherwise. Both are credential-checked, which is also why they double as the
+        admin connection test.
+        """
+        needle = (query or "").strip()
+        if needle:
+            data = self._post(
+                "/institutions/search",
+                {
+                    "query": needle,
+                    "products": ["transactions"],
+                    "country_codes": ["US"],
+                },
+            )
+        else:
+            data = self._post(
+                "/institutions/get",
+                {"count": 500, "offset": 0, "country_codes": ["US"]},
+            )
+        rows: list[ProviderInstitution] = []
+        for row in data.get("institutions") or []:
+            if not isinstance(row, dict):
+                continue
+            institution_id = str(row.get("institution_id") or "")
+            name = str(row.get("name") or "").strip()
+            if not institution_id or not name:
+                continue
+            products = tuple(str(p) for p in (row.get("products") or []))
+            rows.append(
+                ProviderInstitution(
+                    provider=self.name,
+                    institution_id=institution_id,
+                    name=name,
+                    products=products,
+                    # Plaid lists an institution's products independently of what the
+                    # Item was granted; transactions is the capability that matters.
+                    supports_transactions="transactions" in products,
+                    # Balances arrive with /accounts/get for every linked Item.
+                    supports_balances=True,
+                    account_types=("checking", "savings", "credit_card"),
+                )
+            )
+        return rows
+
+    def check_connection(self) -> dict[str, object]:
+        if not self.is_configured():
+            raise ProviderError(
+                "Add the Plaid client ID and secret first.",
+                code="not_configured",
+                retryable=False,
+            )
+        data = self._post(
+            "/institutions/get",
+            {"count": 1, "offset": 0, "country_codes": ["US"]},
+        )
+        total = data.get("total")
+        return {
+            "provider": self.name,
+            "environment": self.environment,
+            "base_url": self.base_url,
+            "institutions": total,
+            "message": (
+                f"Authenticated with Plaid's {self.environment} environment"
+                + (f" ({total} US institutions available)." if total else ".")
+            ),
+        }

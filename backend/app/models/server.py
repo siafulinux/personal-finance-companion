@@ -44,6 +44,12 @@ class ServerSettings(Base, TimestampMixin):
     #: Owner-supplied public address, e.g. https://finance.example.com. When empty
     #: the server derives URLs from the request instead of guessing.
     public_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: Whether the server picks a financial provider per institution. With this off a
+    #: user must use whatever the administrator pinned first, and an institution the
+    #: primary cannot serve is reported as unavailable instead of falling back.
+    provider_auto_select: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
 
 
 class PairingToken(Base, UUIDPrimaryKey):

@@ -25,6 +25,7 @@ from app.providers.base import (
     ProviderAccountData,
     ProviderAdapter,
     ProviderError,
+    ProviderInstitution,
     ProviderTransactionData,
     TransactionDelta,
 )
@@ -320,7 +321,9 @@ class SandboxProvider(ProviderAdapter):
     def can_schedule(self) -> bool:
         return True
 
-    def create_link_token(self, user_id: str) -> dict[str, object]:
+    def create_link_token(
+        self, user_id: str, institution_id: str | None = None
+    ) -> dict[str, object]:
         return {
             "provider": self.name,
             "link_token": f"sbx-link-{_seed(user_id):08x}",
@@ -332,7 +335,7 @@ class SandboxProvider(ProviderAdapter):
             ),
         }
 
-    def complete_link(self, public_token: str) -> LinkResult:
+    def complete_link(self, public_token: str, payload: dict | None = None) -> LinkResult:
         if not public_token or not public_token.startswith("sbx-link-"):
             raise ProviderError(
                 "The sandbox link token is not valid for this flow.",
@@ -450,3 +453,31 @@ class SandboxProvider(ProviderAdapter):
 
     def remove_item(self, access_token: str) -> None:
         _GENERATION.pop(access_token.replace("sbx-access-", "sbx-item-"), None)
+
+    # --- directory + health --------------------------------------------------
+    def list_institutions(self, query: str | None = None) -> list[ProviderInstitution]:
+        name = "Sandbox Credit Union"
+        needle = (query or "").strip().lower()
+        if needle and needle not in name.lower():
+            return []
+        return [
+            ProviderInstitution(
+                provider=self.name,
+                institution_id="ins_sandbox_credit_union",
+                name=name,
+                products=("balance", "transactions"),
+                supports_transactions=True,
+                supports_balances=True,
+                account_types=("checking", "savings", "credit_card"),
+                note="Simulated institution. No bank credentials and no network access.",
+            )
+        ]
+
+    def check_connection(self) -> dict[str, object]:
+        return {
+            "provider": self.name,
+            "environment": "sandbox",
+            "simulated": True,
+            "institutions": 1,
+            "message": "The simulated institution is available; it needs no credentials.",
+        }

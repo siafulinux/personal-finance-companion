@@ -43,7 +43,8 @@ from app.models import ProviderLinkSecret, SyncRun, Transaction, User
 from app.models.enums import TransactionSource
 from app.providers.base import ProviderError
 from app.providers.plaid import SANDBOX_INSTITUTION_ID
-from app.providers.registry import available_providers, get_adapter
+from app.providers.registry import available_providers, build_adapter
+from app.services import provider_config
 from app.services.balances import balances_for_accounts
 from app.services.sync import (
     connect_institution,
@@ -95,13 +96,43 @@ def _provider_count(db, user_id) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    adapter = get_adapter("plaid")
-
-    if not adapter.is_configured():
+    # Resolve the configuration exactly the way the application does: the
+    # administrator's saved values first, the environment second. Reading the
+    # environment directly would make credentials entered on the Providers screen
+    # invisible here, and a verification script that tests a different
+    # configuration than production uses proves nothing.
+    check_db = SessionLocal()
+    try:
+        state = provider_config.resolve(check_db, "plaid")
+    except Exception as err:  # un-migrated database, wrong DB, server down
         print(
-            "Plaid is not configured on this server: PLAID_CLIENT_ID and/or PLAID_SECRET\n"
-            "are unset. Create an account at https://dashboard.plaid.com, copy both keys\n"
-            "from Team settings -> API keys, and add them to .env as:\n\n"
+            "Cannot read this server's provider configuration: "
+            f"{type(err).__name__}: {err}\n"
+            "Run the script where the application's database lives, for example:\n\n"
+            "    docker compose exec api python scripts/verify_plaid_live.py\n\n"
+            "and make sure migrations are applied (api-entrypoint runs them). "
+            "No live call was made.",
+            file=sys.stderr,
+        )
+        return 2
+    finally:
+        check_db.close()
+    adapter = build_adapter(
+        "plaid",
+        credentials={
+            "client_id": state.credential("client_id") or "",
+            "secret": state.credential("secret") or "",
+        },
+        environment=state.environment,
+    )
+
+    if not state.configured or not adapter.is_configured():
+        missing = ", ".join(state.missing) or "PLAID_CLIENT_ID / PLAID_SECRET"
+        print(
+            "Plaid is not configured on this server: " + missing + " missing.\n"
+            "Create an account at https://dashboard.plaid.com, then either (a) sign in as\n"
+            "the server administrator, open Providers -> Plaid and save the client id and\n"
+            "secret (stored encrypted, preferred), or (b) add them to .env as:\n\n"
             "    PLAID_CLIENT_ID=...\n"
             "    PLAID_SECRET=...\n"
             "    PLAID_ENVIRONMENT=sandbox\n\n"
@@ -109,6 +140,8 @@ def run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
+    print(f"plaid configuration source: {state.source} (environment {state.environment})")
 
     if adapter.environment != "sandbox":
         print(
@@ -133,11 +166,16 @@ def run(args: argparse.Namespace) -> int:
         # --- wiring: the registry, not a hand-built adapter ------------------
         providers = {p["name"]: p for p in available_providers()}
         plaid_row = providers.get("plaid", {})
+        # The registry's own flags come from the environment; the saved admin
+        # configuration is authoritative, so the gate reads the resolved state.
+        resolved = provider_config.resolve(db, "plaid")
         steps.record(
             "provider registered and usable",
-            bool(plaid_row.get("configured")) and bool(plaid_row.get("usable")),
+            plaid_row.get("name") == "plaid" and resolved.configured and resolved.enabled,
             name=plaid_row.get("name"),
-            configured=plaid_row.get("configured"),
+            configured=resolved.configured,
+            enabled=resolved.enabled,
+            configuration_source=resolved.source,
             simulated=plaid_row.get("simulated"),
         )
 

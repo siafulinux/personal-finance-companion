@@ -86,6 +86,31 @@ class TransactionDelta:
 
 
 @dataclass(frozen=True)
+class ProviderInstitution:
+    """One institution as a provider's directory describes it.
+
+    The flags are the point: a provider listing an institution does not mean it can serve
+transactions and balances for it, and the selection service must not assume otherwise.
+    """
+
+    provider: str
+    institution_id: str
+    name: str
+    products: tuple[str, ...] = ()
+    supports_transactions: bool = False
+    supports_balances: bool = False
+    account_types: tuple[str, ...] = ()
+    note: str | None = None
+
+    def supports(self, *, transactions: bool = True, balances: bool = True) -> bool:
+        if transactions and not self.supports_transactions:
+            return False
+        if balances and not self.supports_balances:
+            return False
+        return True
+
+
+@dataclass(frozen=True)
 class LinkResult:
     """What ``complete_link`` yields after the user approves an institution."""
 
@@ -107,12 +132,24 @@ class ProviderAdapter(ABC):
         """True when this server holds the credentials needed to use the provider."""
 
     @abstractmethod
-    def create_link_token(self, user_id: str) -> dict[str, object]:
-        """Start a linking flow. Returns at least ``link_token`` and ``provider``."""
+    def create_link_token(
+        self, user_id: str, institution_id: str | None = None
+    ) -> dict[str, object]:
+        """Start a linking flow. Returns at least ``link_token`` and ``provider``.
+
+        ``institution_id`` lets the caller start the flow on the institution the user
+        already chose, instead of asking them to pick it twice. Adapters whose flow has
+        no institution handle simply ignore it.
+        """
 
     @abstractmethod
-    def complete_link(self, public_token: str) -> LinkResult:
-        """Exchange the user's approval for a long-lived access token."""
+    def complete_link(self, public_token: str, payload: dict | None = None) -> LinkResult:
+        """Exchange the user's approval for a long-lived access token.
+
+        ``public_token`` is the credential the provider's own flow returned. ``payload``
+        carries the rest of the provider's hand-off for adapters that mint their token in
+        the client instead of exchanging one server-side (Teller Connect does this).
+        """
 
     @abstractmethod
     def list_accounts(self, access_token: str) -> list[ProviderAccountData]: ...
@@ -130,3 +167,29 @@ class ProviderAdapter(ABC):
     # --- optional capability, implemented by adapters that support scheduled sync ---
     def can_schedule(self) -> bool:
         return False
+
+    # --- optional directory + health, used by provider selection and the admin screen ---
+    def list_institutions(self, query: str | None = None) -> list[ProviderInstitution]:
+        """The provider's institution directory, optionally filtered by name.
+
+        Raising here is meaningful: a provider without a directory cannot take part in
+        institution-first selection, and the caller reports that instead of offering a
+        picker that would fail later.
+        """
+        raise ProviderError(
+            f"{self.display_name} does not publish an institution directory.",
+            code="no_directory",
+            retryable=False,
+        )
+
+    def check_connection(self) -> dict[str, object]:
+        """Prove this server's credentials work, for the administrator's test button.
+
+        Returns a small, non-secret summary. Raises :class:`ProviderError` with a code
+        the admin UI can explain (``not_configured``, ``bad_credentials``, …).
+        """
+        raise ProviderError(
+            f"{self.display_name} does not support a connection test.",
+            code="unsupported",
+            retryable=False,
+        )

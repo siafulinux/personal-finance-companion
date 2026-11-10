@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     default_safe_to_spend_horizon_days: int = 14
     max_safe_to_spend_horizon_days: int = 45
 
+    # --- Phase 4: location-aware Shopping Check ---
+    # Business lookup for a place the phone has detected. ``osm`` queries the
+    # Overpass API (OpenStreetMap data, ODbL, no key, no account). ``none`` keeps
+    # every coordinate on the device and records detections as unnamed places.
+    # Only the single fix sent with a detection is looked up; no coordinate is
+    # stored server-side.
+    places_provider: str = "osm"
+    places_endpoint: str = "https://overpass-api.de/api/interpreter"
+    places_timeout_seconds: float = 6.0
+    # A detection below this confidence is recorded but never announced.
+    visit_notification_min_confidence: float = 0.55
+
     demo_user_email: str = "demo@example.com"
     demo_user_password: str = "DemoPassword123!"
 
@@ -65,8 +77,30 @@ class Settings(BaseSettings):
     plaid_environment: str = "sandbox"
     plaid_base_url: str | None = None
     plaid_webhook_url: str | None = None
+    # --- Administrator-managed provider configuration ---
+    # Credentials entered on the admin screen are stored encrypted in the database and
+    # take precedence over these. The variables remain the Docker-friendly path, so an
+    # owner can configure a deployment without ever opening the UI.
+    #
+    # Teller has no server-side token exchange: its access token is minted by Teller
+    # Connect in the client and returned to us for verification. Outside sandbox the
+    # Teller API requires mutual TLS, hence the client certificate below.
+    teller_application_id: str | None = None
+    teller_environment: str = "sandbox"
+    teller_base_url: str | None = None
+    #: PEM text for the client certificate + key, or an absolute path to a PEM file.
+    teller_certificate: str | None = None
+    teller_private_key: str | None = None
+    #: Teller's token signing public key, used to verify Teller Connect payloads.
+    teller_signing_key: str | None = None
+    teller_provider_enabled: bool = True
+    #: Seed for the server setting; the database value wins once the owner changes it.
+    provider_auto_select: bool = True
+    #: How long an institution list is trusted before it is fetched again.
+    provider_institution_cache_seconds: int = 900
     # The bundled simulated institution. On by default: it needs no credentials.
     sandbox_provider_enabled: bool = True
+
     sync_page_size: int = 100
     sync_max_pages: int = 50
     # Minimum spacing between scheduled syncs for one link, in minutes.

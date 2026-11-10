@@ -26,6 +26,7 @@ export interface Account {
   opening_balance_date: string;
   include_in_safe_to_spend: boolean;
   credit_limit: Money | null;
+  minimum_payment: Money | null;
   description: string | null;
   institution: string | null;
   is_archived: boolean;
@@ -129,6 +130,32 @@ export interface ExplanationLine {
   detail: string | null;
 }
 
+export interface LoanReserveLine {
+  loan_id: string;
+  name: string;
+  due_date: string;
+  amount: Money;
+  is_overdue: boolean;
+  is_estimate: boolean;
+  remaining_balance: Money;
+}
+
+export interface SavingsReserveLine {
+  goal_id: string;
+  name: string;
+  amount: Money;
+  mode: SavingsMode;
+  is_planned_contribution: boolean;
+  due_date: string | null;
+}
+
+export interface CreditCardReserveLine {
+  account_id: string;
+  name: string;
+  minimum_payment: Money;
+  due_date: string | null;
+}
+
 export interface SafeToSpend {
   currency: string;
   as_of: string;
@@ -151,6 +178,13 @@ export interface SafeToSpend {
   warnings: string[];
   explanation: ExplanationLine[];
   stale_information: boolean;
+  loan_reserves?: Money;
+  savings_reserves?: Money;
+  credit_card_reserves?: Money;
+  obligations_total?: Money;
+  loans?: LoanReserveLine[];
+  savings?: SavingsReserveLine[];
+  credit_cards?: CreditCardReserveLine[];
 }
 
 export interface CategoryAvailability {
@@ -469,6 +503,107 @@ export interface ProviderInfo {
   note: string;
 }
 
+/** One institution, already resolved to whichever provider can serve it. */
+export interface InstitutionEntry {
+  key: string;
+  name: string;
+  available: boolean;
+  reason: string | null;
+  simulated: boolean;
+  account_types: string[];
+}
+
+export interface InstitutionCatalog {
+  institutions: InstitutionEntry[];
+  warnings: string[];
+  configured: boolean;
+}
+
+/**
+ * What `/connectivity/connect/start` hands back. `flow` is provider-specific
+ * (a Teller Connect configuration or a Plaid link token) and the client only
+ * forwards it to the provider's own script.
+ */
+export interface ConnectFlow {
+  connection: InstitutionEntry;
+  provider: string;
+  mode: "teller_connect" | "plaid_link" | "direct" | string;
+  flow: Record<string, unknown>;
+}
+
+export interface ConnectResult {
+  link: ProviderLink;
+  accounts: LinkedAccountRef[];
+  sync: SyncRunSummary;
+}
+
+export interface ProviderCredentialField {
+  key: string;
+  label: string;
+  secret: boolean;
+  required: boolean;
+  multiline: boolean;
+  placeholder: string | null;
+  help: string;
+  present: boolean;
+  value: string | null;
+  hint: string | null;
+}
+
+export interface ProviderTestResult {
+  at: string | null;
+  ok: boolean | null;
+  message: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface ProviderAdmin {
+  name: string;
+  label: string;
+  enabled: boolean;
+  priority: number;
+  environment: string;
+  environments: string[];
+  configured: boolean;
+  usable: boolean;
+  source: "database" | "environment" | "none";
+  missing: string[];
+  problem: string | null;
+  fields: ProviderCredentialField[];
+  last_test: ProviderTestResult | null;
+}
+
+export interface ProviderOverview {
+  providers: ProviderAdmin[];
+  auto_select: boolean;
+  primary: string | null;
+  any_usable: boolean;
+  sandbox_available: boolean;
+}
+
+export interface CoverageMatch {
+  institution_id: string;
+  name: string;
+  products: string[];
+  transactions: boolean;
+  balances: boolean;
+  account_types: string[];
+  note: string | null;
+}
+
+export interface CoverageProvider {
+  provider: string;
+  label: string;
+  available: boolean;
+  reason: string | null;
+  match: CoverageMatch | null;
+}
+
+export interface CoverageReport {
+  auto_select: boolean;
+  institutions: { query: string; providers: CoverageProvider[] }[];
+}
+
 export interface LinkedAccountRef {
   id: string;
   name: string;
@@ -627,4 +762,304 @@ export interface AssistantAnswer {
   can_modify_data: boolean;
   disclaimer: string;
   note?: string;
+}
+
+// ---------------------------------------------------------------- Phase 4: loans
+export type LoanType =
+  | "personal"
+  | "payday"
+  | "cash_advance"
+  | "earned_wage_access"
+  | "buy_now_pay_later"
+  | "installment"
+  | "credit_agreement"
+  | "other";
+
+export interface Loan {
+  id: string;
+  name: string;
+  lender: string | null;
+  loan_type: LoanType;
+  original_amount: Money;
+  opening_balance: Money;
+  balance_as_of: string;
+  balance_source: string;
+  apr: string | null;
+  interest_charged: Money | null;
+  fees_charged: Money | null;
+  next_payment_date: string | null;
+  scheduled_payment: Money | null;
+  payment_frequency: string | null;
+  remaining_payments: number | null;
+  account_id: string | null;
+  category_id: string | null;
+  status: "active" | "paid_off" | "defaulted";
+  notes: string | null;
+  created_at: string;
+  current_balance: Money;
+  principal_repaid: Money;
+  interest_paid: Money;
+  fees_paid: Money;
+  total_repaid: Money;
+  balance_is_estimate: boolean;
+  progress_percent: Money;
+  payment_count: number;
+  last_payment_date: string | null;
+  estimated_payoff_date: string | null;
+  payoff_is_estimate: boolean;
+  remaining_installments: number | null;
+}
+
+export interface LoanSummary {
+  total_outstanding: Money;
+  total_original: Money;
+  active_loans: number;
+  next_payment_date: string | null;
+  next_payment_total: Money;
+  loans: Loan[];
+}
+
+export interface LoanPayment {
+  id: string;
+  loan_id: string;
+  transaction_id: string | null;
+  amount: Money;
+  principal_amount: Money | null;
+  interest_amount: Money | null;
+  fee_amount: Money | null;
+  paid_on: string;
+  status: "suggested" | "confirmed" | "rejected";
+  confidence: string;
+  is_automatic: boolean;
+  is_ambiguous: boolean;
+  reason: string | null;
+  notes: string | null;
+  created_at: string;
+  transaction_description: string | null;
+  transaction_merchant: string | null;
+}
+
+export interface LoanPaymentSuggestion {
+  transaction_id: string;
+  description: string;
+  merchant: string | null;
+  amount: Money;
+  txn_date: string;
+  account_id: string;
+  confidence: string;
+  reason: string;
+  is_ambiguous: boolean;
+}
+
+// -------------------------------------------------------------- Phase 4: savings
+export type SavingsMode = "virtual" | "account";
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  target_amount: Money;
+  target_date: string | null;
+  mode: SavingsMode;
+  saved_amount: Money;
+  account_id: string | null;
+  account_name: string | null;
+  account_balance: Money | null;
+  account_is_spendable: boolean | null;
+  category_id: string | null;
+  contribution_amount: Money | null;
+  contribution_frequency: string | null;
+  status: "active" | "completed" | "archived";
+  color: string | null;
+  notes: string | null;
+  created_at: string;
+  progress_percent: Money;
+  remaining_to_target: Money;
+  protected_amount: Money;
+  protects_money: boolean;
+  next_contribution_date: string | null;
+  required_per_period: Money | null;
+  projected_completion: string | null;
+}
+
+export interface SavingsSummary {
+  total_target: Money;
+  total_saved: Money;
+  total_protected: Money;
+  active_goals: number;
+  completed_goals: number;
+  monthly_commitment: Money;
+  goals: SavingsGoal[];
+}
+
+// ----------------------------------------------------------- Phase 4: obligations
+export interface ObligationItem {
+  kind: "bill" | "loan" | "credit_card";
+  id: string;
+  source_id: string;
+  name: string;
+  detail: string | null;
+  due_date: string | null;
+  amount: Money;
+  status: string;
+  is_overdue: boolean;
+  is_estimate: boolean;
+  is_essential: boolean;
+  category_id: string | null;
+  account_id: string | null;
+  reserved_in_safe_to_spend: boolean;
+  remaining_balance?: Money;
+}
+
+export interface Obligations {
+  today: string;
+  horizon_end: string;
+  next_payday: string | null;
+  items: ObligationItem[];
+  counts: { total: number; overdue: number; estimated: number };
+  totals: {
+    due_in_horizon: Money;
+    overdue: Money;
+    due_within_7_days: Money;
+    due_before_payday: Money;
+  };
+  income: {
+    next_payday: string | null;
+    sources: { name: string; amount: Money; frequency: string; next_payday: string | null }[];
+    note: string;
+  };
+  data_freshness: { last_transaction_date: string | null; stale: boolean; warning: string | null };
+  double_counting_guards: string[];
+}
+
+// ------------------------------------------------- Phase 4: merchants & shopping
+export interface MerchantRow {
+  merchant_key: string;
+  merchant: string;
+  category_id: string | null;
+  category_name: string | null;
+  transaction_count: number;
+  total: Money;
+  average: Money;
+  largest: Money;
+  last_purchase: string;
+  months_observed: number;
+  prior_total: Money;
+  change_percent: string | null;
+  has_enough_history: boolean;
+  confidence: "low" | "medium" | "high";
+  window_days: number;
+}
+
+export interface MerchantFinding {
+  key: string;
+  type: string;
+  severity: "high" | "medium" | "low";
+  merchant: string;
+  merchant_key: string;
+  category_id?: string;
+  title: string;
+  message: string;
+  confidence: string;
+  evidence: Record<string, string | number>;
+}
+
+export interface MerchantInsights {
+  window_days: number;
+  start: string;
+  end: string;
+  minimum_history: { months: number; transactions: number };
+  merchants: MerchantRow[];
+  findings: MerchantFinding[];
+  dismissed: string[];
+  note: string;
+}
+
+export interface TrackedLocation {
+  id: string;
+  name: string;
+  merchant: string | null;
+  merchant_key: string | null;
+  address: string | null;
+  latitude: string | null;
+  longitude: string | null;
+  radius_m: number;
+  category_id: string | null;
+  monthly_budget: Money | null;
+  notify_enabled: boolean;
+  is_active: boolean;
+  source: string;
+  notes: string | null;
+  created_at: string;
+  visit_count: number;
+  last_visit_at: string | null;
+  month_spend: Money | null;
+  budget_remaining: Money | null;
+}
+
+export interface ShoppingVisit {
+  id: string;
+  tracked_location_id: string | null;
+  business_name: string;
+  merchant_key: string;
+  category_id: string | null;
+  visited_at: string;
+  visit_day: string;
+  status: "detected" | "suggested" | "confirmed" | "ignored";
+  confidence: string;
+  distance_m: number | null;
+  source: string;
+  note: string | null;
+  is_new_place: boolean;
+  visit_count: number;
+  transaction_count: number;
+  spend_total: Money;
+}
+
+export interface ShoppingVisits {
+  items: ShoppingVisit[];
+  count: number;
+  suggested: number;
+  tracked_locations: number;
+  retention_days: number;
+  note: string;
+}
+
+export interface LocationSettings {
+  location_features_opted_in: boolean;
+  shopping_intelligence_enabled: boolean;
+  discovery_enabled: boolean;
+  paused: boolean;
+  location_paused_until: string | null;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  quiet_hours_timezone: string | null;
+  notification_cooldown_minutes: number;
+  visit_history_retention_days: number;
+  tracked_location_count: number;
+  supported: { business_lookup: string; lookup_attribution: string };
+}
+
+export interface RecommendationItem {
+  key: string;
+  kind: string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  message: string;
+  confidence: string;
+  facts: Record<string, string | number | null>;
+  period?: Record<string, string>;
+  merchant?: string;
+  category_id?: string | null;
+  suggested_limit?: Money;
+}
+
+export interface Recommendations {
+  generated_at: string;
+  today: string;
+  data_freshness: { last_transaction_date: string | null; stale: boolean; checked_at: string };
+  safe_to_spend: Money;
+  obligations_due: Money;
+  savings_protected: Money;
+  items: RecommendationItem[];
+  note: string;
 }

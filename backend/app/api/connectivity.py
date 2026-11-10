@@ -16,6 +16,8 @@ from app.providers.base import ProviderError
 from app.providers.registry import available_providers, get_adapter
 from app.schemas.common import APIModel
 from app.security.deps import get_current_user
+from app.security.link_nonce import NonceError
+from app.services import provider_selection
 from app.services.errors import DomainError, ValidationError
 from app.services.sync import (
     connect_institution,
@@ -39,6 +41,118 @@ class ExchangeRequest(APIModel):
     # The user's approval from the provider's own flow. Never a bank password.
     public_token: str = Field(min_length=1, max_length=2000)
     consent: bool = True
+
+
+class InstitutionChoice(APIModel):
+    """The institution the user picked, as the catalogue showed it."""
+
+    institution_name: str = Field(min_length=1, max_length=200)
+    institution_key: str | None = Field(default=None, max_length=40)
+
+
+class ConnectFinishRequest(InstitutionChoice):
+    """What the provider's flow handed back.
+
+    ``public_token`` is the approval credential: a Plaid public token, or the access
+    token Teller Connect minted in the client. The remaining fields are the Teller
+    enrolment's identity and signature, which the server verifies before storing
+    anything.
+    """
+
+    public_token: str = Field(min_length=1, max_length=4000)
+    consent: bool = True
+    nonce: str | None = Field(default=None, max_length=400)
+    user_id: str | None = Field(default=None, max_length=120)
+    enrollment_id: str | None = Field(default=None, max_length=160)
+    signatures: list[str] | None = Field(default=None, max_length=10)
+
+
+@router.get("/catalog")
+def get_catalog(
+    query: str | None = Query(default=None, max_length=80),
+    limit: int = Query(default=40, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Institutions this server can connect, with no provider detail exposed.
+
+    Each entry is already resolved to the provider that will serve it; an institution no
+    provider can serve is returned as unavailable with the reason, so the UI can say so
+    instead of offering a connection that would fail mid-flow.
+    """
+    result = provider_selection.catalog(db, query, limit=limit)
+    body = result.as_dict()
+    # Tell the user plainly when nothing can be connected at all, rather than showing an
+    # empty search box with no explanation.
+    body["configured"] = any(entry["available"] for entry in body["institutions"])
+    return body
+
+
+@router.post("/connect/start")
+def start_connection(
+    payload: InstitutionChoice,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Begin the chosen provider's authorisation flow for one institution."""
+    try:
+        return provider_selection.start_link(
+            db,
+            str(user.id),
+            payload.institution_name,
+            key=payload.institution_key,
+        )
+    except DomainError:
+        raise
+    except ProviderError as exc:
+        raise ValidationError(exc.message) from exc
+
+
+@router.post("/connect/finish", status_code=201)
+def finish_connection(
+    payload: ConnectFinishRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Complete the flow, store the connection and run the first sync."""
+    if not payload.consent:
+        raise ValidationError(
+            "Consent is required before data can be imported from a financial institution."
+        )
+    extra = {
+        "nonce": payload.nonce,
+        "user_id": payload.user_id,
+        "enrollment_id": payload.enrollment_id,
+        "signatures": payload.signatures,
+    }
+    try:
+        link, accounts, run = provider_selection.finish_link(
+            db,
+            user,
+            payload.institution_name,
+            key=payload.institution_key,
+            public_token=payload.public_token,
+            payload={k: v for k, v in extra.items() if v is not None},
+        )
+    except NonceError as exc:
+        raise ValidationError(str(exc)) from exc
+    except DomainError:
+        raise
+    except ProviderError as exc:
+        raise ValidationError(exc.message) from exc
+    return {
+        "link": serialize_link(db, link),
+        "accounts": [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "account_type": a.account_type,
+                "external_account_id": a.external_account_id,
+            }
+            for a in accounts
+        ],
+        "sync": serialize_run(run),
+    }
 
 
 @router.get("/providers")
