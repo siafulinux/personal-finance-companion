@@ -98,6 +98,18 @@ def build_snapshot(db: Session, user: User, question: str) -> Snapshot:
         wants.add("safe_to_spend")
     if any(word in lowered for word in ("bill", "due", "owe")):
         wants.add("upcoming_bills")
+        wants.add("obligations")
+    if any(
+        word in lowered
+        for word in ("loan", "advance", "bnpl", "repay", "borrow", "installment", "instalment")
+    ):
+        wants.add("loans")
+    if any(word in lowered for word in ("saving", "savings", "goal", "set aside", "emergency fund")):
+        wants.add("savings")
+    if any(word in lowered for word in ("recommend", "should i", "reduce", "cut back", "too much")):
+        wants.add("recommendations")
+    if any(word in lowered for word in ("merchant", "store", "shop", "where do i")):
+        wants.add("merchant_insights")
     if any(word in lowered for word in ("payday", "paycheck", "income", "next week", "month")):
         wants.add("forecast")
     if any(word in lowered for word in ("subscription", "recurring", "membership")):
@@ -201,6 +213,69 @@ def deterministic_answer(snapshot: Snapshot) -> str:
         )
     elif budget:
         lines.append("You have no budget for this month yet.")
+
+    obligations = tools.get("obligations")
+    if obligations:
+        totals = obligations.get("totals", {})
+        lines.append(
+            f"Obligations in the next {len(obligations.get('items', []))} item(s) total "
+            f"{totals.get('due_in_horizon', '0.00')}, of which {totals.get('overdue', '0.00')} "
+            f"is overdue and {totals.get('due_before_payday', '0.00')} falls due before payday."
+        )
+        upcoming = [item for item in obligations.get("items", []) if item.get("due_date")][:4]
+        if upcoming:
+            lines.append(
+                "Next: "
+                + ", ".join(
+                    f"{item['name']} {item['amount']} on {item['due_date']}" for item in upcoming
+                )
+                + "."
+            )
+
+    loans = tools.get("loans")
+    if loans:
+        active = loans.get("active_loans", 0)
+        if active:
+            lines.append(
+                f"You have {active} active loan(s) with {loans['total_outstanding']} outstanding"
+                + (
+                    f"; the next payment is {loans['next_payment_total']} on {loans['next_payment_date']}."
+                    if loans.get("next_payment_date")
+                    else "; no next payment date is recorded."
+                )
+            )
+            estimates = [
+                loan["name"] for loan in loans.get("loans", []) if loan.get("balance_is_estimate")
+            ]
+            if estimates:
+                lines.append(
+                    "These balances are calculated from incomplete terms: "
+                    + ", ".join(estimates[:3])
+                    + "."
+                )
+        else:
+            lines.append("No active loans or advances are recorded.")
+
+    savings = tools.get("savings")
+    if savings:
+        if savings.get("active_goals"):
+            lines.append(
+                f"Savings goals hold {savings['total_saved']} of {savings['total_target']}; "
+                f"{savings['total_protected']} of that is money the plan keeps out of Safe-to-Spend."
+            )
+        else:
+            lines.append("No savings goals are set up.")
+
+    recommendations = tools.get("recommendations")
+    if recommendations:
+        for item in recommendations.get("items", [])[:3]:
+            lines.append(f"{item['title']}: {item['message']}")
+
+    merchants = tools.get("merchant_insights")
+    if merchants:
+        findings = merchants.get("findings", [])[:2]
+        for finding in findings:
+            lines.append(f"{finding['title']}: {finding['message']}")
 
     recurring = tools.get("recurring_payments")
     if recurring:
@@ -327,6 +402,11 @@ def assistant_status(db: Session, user: User) -> dict[str, object]:
             "balances",
             "safe_to_spend",
             "upcoming_bills",
+            "obligations",
+            "loans_and_advances",
+            "savings_goals",
+            "recommendations",
+            "merchant_insights",
             "budget_status",
             "subscriptions",
             "cash_flow_forecast",
