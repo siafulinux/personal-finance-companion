@@ -17,10 +17,21 @@ and can change that later without rebuilding anything.
 | Save server | Enabled **only after a successful test**, so a typo cannot strand the user on an address nothing answers at. |
 | Current server | Shown above the field; the app also keeps up to five recently used servers as chips. |
 
-The first launch after install still defaults to the developer address
-(`BuildConfig.API_BASE_URL`, `https://10.0.2.2:8443/api/v1/`) so the existing emulator
-workflow keeps working. Changing it is the expected first step on a real device or a new
-emulator — no rebuild, no reinstall.
+The first launch after install defaults to `BuildConfig.API_BASE_URL`, which is the
+developer address `https://10.0.2.2:8443/api/v1/` unless the build set it:
+
+```bash
+./gradlew assembleRelease -PpfcApiBaseUrl=https://finance.example.com
+# or, equivalently for CI and scripts:
+PFC_API_BASE_URL=https://finance.example.com ./gradlew assembleRelease
+```
+
+The Gradle property takes precedence over the environment variable, and both take
+precedence over the emulator default. The value is normalised the way `ServerUrl` would
+normalise it — a bare host gets `https://`, `/api/v1/` is added if missing — so an APK can
+be handed to a user already pointed at their server. An unusable value fails the build.
+Changing the address after install is still the expected first step on a real device or a
+new emulator — no rebuild, no reinstall.
 
 ---
 

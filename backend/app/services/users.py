@@ -610,9 +610,18 @@ def delete_user_account(db: Session, user: User, password: str, confirm: str) ->
     db.execute(sa_delete(BalanceAdjustment).where(BalanceAdjustment.user_id == user.id))
     db.execute(sa_delete(IncomeSource).where(IncomeSource.user_id == user.id))
     db.execute(sa_delete(MerchantAlias).where(MerchantAlias.user_id == user.id))
-    budgets = list(db.scalars(select(Budget).where(Budget.user_id == user.id)))
-    for budget in budgets:
-        db.delete(budget)
+    # Budgets and their allocations must go explicitly, children first, and *before*
+    # categories and the user row: `budget_allocations.category_id` and
+    # `budgets.user_id` are ON DELETE CASCADE, so those two deletes already remove
+    # them in the database. Loading the budgets and calling db.delete() on each asked
+    # the ORM for a second DELETE that matched no rows, which SQLAlchemy reports as
+    # "expected to delete N row(s); 0 were matched".
+    db.execute(
+        sa_delete(BudgetAllocation).where(
+            BudgetAllocation.budget_id.in_(select(Budget.id).where(Budget.user_id == user.id))
+        )
+    )
+    db.execute(sa_delete(Budget).where(Budget.user_id == user.id))
     db.execute(sa_delete(Category).where(Category.user_id == user.id))
     db.execute(sa_delete(UserPreference).where(UserPreference.user_id == user.id))
     db.execute(sa_delete(NotificationPreference).where(NotificationPreference.user_id == user.id))
