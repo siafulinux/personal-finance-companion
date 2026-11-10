@@ -9,18 +9,31 @@ name: CI
 # `workflow_dispatch` is the escape hatch: when a release does need verifying on
 # demand, run the workflow from the Actions tab and pick the tag as the ref. A
 # manual run is a deliberate request, so it is the one path that tests a tag.
+#
+# `schedule` catches the regressions a push cannot: a dependency publishing a
+# breaking release, a test that only fails on a particular calendar date, or a
+# fixture that silently aged out. Nothing has to change in this repository for
+# those to break the build, so the suite runs against the default branch every
+# night. Scheduled runs always use the default branch's copy of this file, and
+# GitHub disables the schedule after 60 days without repository activity.
+# 03:17 UTC keeps clear of the top-of-hour queue GitHub documents as busiest.
 on:
   push:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
 
 # A new push supersedes the run for the same ref; the old one has nothing to add.
+# The event is part of the group so a nightly run and a push on the same commit
+# do not cancel each other: a cancelled schedule looks like a failure in the
+# Actions list, and cancelling a push run would hide the signal it was run for.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -114,3 +127,24 @@ jobs:
         # compileSdk 36 is on the runner image; AGP installs any missing SDK
         # component itself because the image already accepts the licences.
         run: ./gradlew testDebugUnitTest --stacktrace
+      - name: Assemble with a custom server address
+        # The default address is the emulator loopback, so a broken
+        # `pfcApiBaseUrl` override would not surface until someone built an APK
+        # for a real server. Assemble with a LAN address and prove the value
+        # reached the APK rather than assuming the property was read.
+        run: |
+          set -euo pipefail
+          base=http://10.0.2.2:8088/api/v1
+          ./gradlew :app:assembleDebug -PpfcApiBaseUrl="$base" --stacktrace
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          found=0
+          for dex in $(unzip -Z1 "$apk" | grep -E '^classes[0-9]*\.dex$'); do
+            if unzip -p "$apk" "$dex" | strings | grep -qF "$base"; then
+              found=1
+              break
+            fi
+          done
+          test "$found" = 1 || {
+            echo "::error::pfcApiBaseUrl did not reach the APK; the override is broken"
+            exit 1
+          }
