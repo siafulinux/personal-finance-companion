@@ -39,7 +39,11 @@ services:
       TZ: ${APP_TIMEZONE:-UTC}
     volumes:
       - db-data:/var/lib/postgresql/data
-    # No published port: the database is only reachable from the backend network.
+    ports:
+      # Diagnostics only: bound to the loopback address, so the database is
+      # reachable from this machine (psql, pg_dump, EXPLAIN) but never from the
+      # LAN. Change the host side with PFC_DB_PORT if 5433 is already taken.
+      - "127.0.0.1:${PFC_DB_PORT:-5433}:5432"
     networks:
       - backend
     healthcheck:

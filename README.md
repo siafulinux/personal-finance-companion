@@ -175,6 +175,14 @@ git config core.hooksPath .githooks   # once per clone
 `git tag` + `git push` cannot slip an unverified release through. A tag whose CI run is still
 in progress is refused with a message saying so; push the commit as a branch and wait.
 
+One push produces **one** run, for the commit at its tip — not one run per commit. Pushing
+three commits verifies only the third; the two beneath it have no run of their own, so a tag
+on one of them is refused with `no CI run exists for <sha>` even though the code reached
+GitHub. Tag a commit that was itself a tip instead (a squashed merge on `master` is one), or
+push the older commit as the tip of its own branch first. A pull request's head commit is
+verified by both the `push` and the `pull_request` runs, which is why PR checks can list the
+same job twice.
+
 The check reads the runs through the GitHub CLI, so `gh auth login` must have been done once.
 When it cannot reach GitHub it refuses rather than allowing the tag — a release that cannot
 be verified is not treated as verified.
@@ -183,6 +191,12 @@ CI can also be run on demand from the Actions tab, or with `gh workflow run CI -
 The trigger comes from the workflow file at the ref being run, so a tag cut before this
 trigger existed cannot be dispatched; run the commit as a branch, or cut a fresh tag from a
 commit that contains it.
+
+The same suite also runs **nightly at 03:17 UTC against `master`**, because some failures
+arrive without a push: a dependency's new release, a test that only fails on a particular
+date, or a fixture that aged out. Scheduled runs always use the default branch's copy of the
+workflow, and GitHub disables the schedule after 60 days without repository activity — the
+next push turns it back on.
 
 ## Android app
 

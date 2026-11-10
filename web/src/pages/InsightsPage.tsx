@@ -198,7 +198,9 @@ export function InsightsPage() {
           </div>
         ) : (
           <p className="small muted" style={{ marginTop: "0.6rem" }}>
-            No merchant pattern is strong enough to report yet.
+            {merchantsQuery.data?.merchants.length
+              ? "No pattern is strong enough to report yet. The merchants below are what your history supports so far — a pattern needs a few more purchases before it is stated."
+              : "No merchant purchases in this window yet, so there is nothing to compare."}
           </p>
         )}
 

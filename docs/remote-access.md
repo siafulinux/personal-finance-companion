@@ -26,8 +26,11 @@ What is safe about it, and what is not:
   over HTTP — setting it to `true` without TLS would silently break sign-in.
 - `TRUSTED_HOSTS=*` is required to reach the server by IP address. Set the real domain there
   once you have one.
-- PostgreSQL (`5432`), the API (`8000`) and the web container (`80`) publish no host port at
-  all; only Caddy is reachable. Confirm with `docker compose ps` and `ss -ltnp`.
+- The API (`8000`) and the web container (`80`) publish no host port at all, and only Caddy
+  is reachable from the network. PostgreSQL is the one exception, and only on the loopback
+  address (`127.0.0.1:${PFC_DB_PORT:-5433}` in the shipped compose file) so `psql` and
+  `pg_dump` work on the host itself; it is never bound to a LAN interface. Confirm with
+  `docker compose ps` and `ss -ltnp`.
 - Authentication, CSRF and rate limiting are unchanged from the HTTPS deployment.
 
 ### Firewall
