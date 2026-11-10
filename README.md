@@ -160,6 +160,30 @@ On a first run, `npx playwright install chromium` fetches the browser. The brows
 
 The backend suite runs against a separate `finance_test` database and covers the acceptance scenarios A-J, plus authentication, CSRF, ownership isolation, duplicate detection, session revocation, throttling and edge cases (negative Safe-to-Spend, stale balances, ambiguous matches).
 
+## Release tags
+
+Tag pushes do not start CI, so a release tag is only trustworthy if the commit under it was
+already verified on a branch. Three small tools enforce that:
+
+```bash
+git config core.hooksPath .githooks   # once per clone
+./scripts/verify-ci HEAD              # is this commit green? exit 0 = yes
+./scripts/tag-release v0.6.0          # annotated tag, refused unless CI passed
+```
+
+`.githooks/pre-push` runs the same check for every tag being pushed (and only for tags), so
+`git tag` + `git push` cannot slip an unverified release through. A tag whose CI run is still
+in progress is refused with a message saying so; push the commit as a branch and wait.
+
+The check reads the runs through the GitHub CLI, so `gh auth login` must have been done once.
+When it cannot reach GitHub it refuses rather than allowing the tag — a release that cannot
+be verified is not treated as verified.
+
+CI can also be run on demand from the Actions tab, or with `gh workflow run CI --ref <ref>`.
+The trigger comes from the workflow file at the ref being run, so a tag cut before this
+trigger existed cannot be dispatched; run the commit as a branch, or cut a fresh tag from a
+commit that contains it.
+
 ## Android app
 
 ```bash
@@ -218,6 +242,10 @@ account, registration policy). Point the Android app at the same address —
   pairing, environment variables.
 - [Android server connection](docs/android-server-connection.md) — how a phone finds and
   trusts your server.
+- [Provider administration](docs/financial-provider-administration.md) — configuring Teller
+  and Plaid once, credential storage, connection tests and troubleshooting.
+- [Provider selection](docs/financial-provider-selection.md) — how an institution is matched
+  to a provider, fallback and reauthorisation rules, and what is unverified.
 - [Remote access](docs/remote-access.md) — trusted LAN, public HTTPS, tunnels, and what is
   still unverified.
 
@@ -231,6 +259,8 @@ account, registration policy). Point the Android app at the same address —
 - [Phase 1.2 report](docs/acceptance-phase-1.2.md) — end-to-end validation, hardening, backup/restore and security evidence.
 - [Phase 1.3 report](docs/acceptance-phase-1.3.md) — recovery gate, service supervision, LAN TLS, session revocation and remaining risks.
 - [Phase 2 Docker report](docs/acceptance-phase-2-docker.md) — the self-hosted deployment, first-run setup, Android connectivity and what remains unverified.
+- [Provider configuration report](docs/acceptance-provider-configuration.md) — administrator-managed Teller/Plaid configuration, selection evidence and remaining gaps.
+- [Institution coverage](docs/financial-provider-coverage.md) — generated table of what each provider's directory actually says about USAA, Cash App and common borrowing apps (currently unverified: see its status line).
 - [Backups](docs/backups.md) — the weekly dump/verify/prune routine, retention, restore drill and what it does not cover.
 - [Reboot verification](docs/boot-verification.md) — how to prove the supervised stack returns after a reboot, and what to check when it does not.
 - [Changelog](CHANGELOG.md) — release history, including the 2026-11-03 data loss and the restore that produced the `v0.1.0-recovered` baseline.

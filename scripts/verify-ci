@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Fail unless the commit behind a ref has a passing CI run on GitHub.
+#
+#   scripts/verify-ci HEAD
+#   scripts/verify-ci v0.5.0
+#
+# Used by .githooks/pre-push and scripts/tag-release, and usable on its own to
+# answer "is this commit actually green?" without opening a browser.
+#
+# Exit codes: 0 verified, 1 not verified, 2 cannot verify (no gh, no repo, no auth).
+set -euo pipefail
+
+target=${1:-HEAD}
+fail() {
+  printf 'verify-ci: %s\n' "$*" >&2
+  exit 2
+}
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed, so CI cannot be checked."
+
+# An annotated tag points at a tag object; ^{commit} peels it to the commit.
+sha=$(git rev-parse --verify --quiet "${target}^{commit}") ||
+  fail "$target does not name a commit in this repository."
+
+remote_url=$(git remote get-url origin 2>/dev/null) || fail "this repository has no 'origin' remote."
+# `gh repo view` resolves the remote for the current directory, which avoids
+# hand-parsing both the ssh and https forms of the origin URL.
+repository=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) ||
+  fail "cannot read the GitHub repository for origin ($remote_url)."
+
+# Runs for this exact commit, any branch or tag. The workflow is matched by the
+# name in the file (CI), because a repository may gain other workflows.
+runs=$(gh api "repos/${repository}/actions/runs?head_sha=${sha}&per_page=100" \
+  --jq '[.workflow_runs[] | select(.name == "CI")]' 2>/dev/null) ||
+  fail "cannot list workflow runs for ${repository} (check 'gh auth status')."
+
+conclusion=$(printf '%s' "$runs" | python3 -c '
+import json, sys
+runs = json.load(sys.stdin)
+if not runs:
+    print("none")
+    sys.exit()
+if any(run.get("conclusion") == "success" for run in runs):
+    print("success")
+elif any(run.get("status") != "completed" for run in runs):
+    print("running")
+else:
+    print(runs[0].get("conclusion") or "unknown")
+')
+
+short=${sha:0:8}
+case "$conclusion" in
+  success)
+    printf 'verify-ci: %s is green (CI run passed).\n' "$short"
+    ;;
+  none)
+    printf 'verify-ci: no CI run exists for %s. Push its branch first.\n' "$short" >&2
+    exit 1
+    ;;
+  running)
+    printf 'verify-ci: CI for %s is still running. Wait for the run to finish.\n' "$short" >&2
+    exit 1
+    ;;
+  *)
+    printf 'verify-ci: the newest CI run for %s concluded "%s".\n' "$short" "$conclusion" >&2
+    exit 1
+    ;;
+esac
