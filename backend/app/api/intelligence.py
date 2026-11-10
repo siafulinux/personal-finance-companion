@@ -22,7 +22,15 @@ from app.services.intelligence import (
     set_recurring_status,
     unusual_transactions,
 )
+from app.services.merchant_intelligence import (
+    dismiss as dismiss_finding,
+    list_dismissed,
+    merchant_findings,
+    merchant_overview,
+    restore as restore_finding,
+)
 from app.services.personal import merchant_profile, spending_insights
+from app.services.recommendations import build_recommendations
 from app.utils.money import ZERO, quantize
 
 router = APIRouter(tags=["intelligence"])
@@ -196,6 +204,51 @@ def get_merchant_profile(
     db: Session = Depends(get_db),
 ) -> dict:
     return merchant_profile(db, user, merchant)
+
+
+@router.get("/insights/merchants")
+def get_merchants(
+    days: int = Query(default=90, ge=30, le=365),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    payload = merchant_overview(db, user, days=days)
+    payload["findings"] = merchant_findings(db, user)
+    payload["dismissed"] = list_dismissed(db, user.id)
+    return payload
+
+
+class FindingKey(APIModel):
+    key: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/insights/merchants/dismiss")
+def dismiss_merchant_finding(
+    payload: FindingKey,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    dismiss_finding(db, user.id, payload.key)
+    return {"key": payload.key, "dismissed": True}
+
+
+@router.post("/insights/merchants/restore")
+def restore_merchant_finding(
+    payload: FindingKey,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    restore_finding(db, user.id, payload.key)
+    return {"key": payload.key, "dismissed": False}
+
+
+@router.get("/recommendations")
+def get_recommendations(
+    limit: int = Query(default=8, ge=1, le=20),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return build_recommendations(db, user, limit=limit)
 
 
 # ------------------------------------------------------------------ preferences

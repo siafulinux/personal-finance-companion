@@ -7,7 +7,7 @@ only for a breaking change to the HTTP API, not for new endpoints.
 
 from __future__ import annotations
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 API_VERSION = 1
 
 # The oldest client API generation this server still serves.

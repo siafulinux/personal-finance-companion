@@ -157,6 +157,42 @@ def get_category_availability(db: Session, user: User, category_id) -> dict[str,
     return category_availability(db, user, category_id).as_dict()
 
 
+def get_loans(db: Session, user: User) -> dict[str, Any]:
+    from app.services.loans import summary as loan_summary
+
+    return loan_summary(db, user.id)
+
+
+def get_savings_goals(db: Session, user: User) -> dict[str, Any]:
+    from app.services.savings import summary as savings_summary
+
+    return savings_summary(db, user)
+
+
+def get_obligations(db: Session, user: User, days: int = 30) -> dict[str, Any]:
+    from app.services.obligations import unified_obligations
+
+    return unified_obligations(db, user, days=days)
+
+
+def get_recommendations(db: Session, user: User) -> dict[str, Any]:
+    from app.services.recommendations import build_recommendations
+
+    return build_recommendations(db, user)
+
+
+def get_merchant_insights(db: Session, user: User) -> dict[str, Any]:
+    from app.services.merchant_intelligence import merchant_findings, merchant_overview
+
+    overview = merchant_overview(db, user)
+    return {
+        "window_days": overview["window_days"],
+        "minimum_history": overview["minimum_history"],
+        "merchants": overview["merchants"][:8],
+        "findings": merchant_findings(db, user)[:5],
+    }
+
+
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "accounts": {"description": "Account balances and totals", "fn": get_account_summaries},
     "spending": {"description": "Spending and income summary", "fn": get_spending_summary},
@@ -167,6 +203,17 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "forecast": {"description": "Cash-flow forecast", "fn": get_cash_flow_forecast},
     "category_trends": {"description": "Category spending trends", "fn": get_category_trends},
     "category_availability": {"description": "Category budget availability", "fn": get_category_availability},
+    "loans": {"description": "Loans, advances and repayment schedules", "fn": get_loans},
+    "savings": {"description": "Savings goals and protected money", "fn": get_savings_goals},
+    "obligations": {"description": "Unified upcoming obligations", "fn": get_obligations},
+    "recommendations": {
+        "description": "Engine-produced recommendations",
+        "fn": get_recommendations,
+    },
+    "merchant_insights": {
+        "description": "Merchant spending patterns",
+        "fn": get_merchant_insights,
+    },
 }
 
 

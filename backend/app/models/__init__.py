@@ -12,7 +12,10 @@ from app.models.connectivity import (
     SyncRun,
 )
 from app.models.import_job import ImportRecord, TransactionImport
+from app.models.loan import Loan, LoanPayment
+from app.models.location import ShoppingVisit, TrackedLocation
 from app.models.provider import PROVIDER_NAMES, ProviderConfig
+from app.models.savings import InsightDismissal, SavingsContribution, SavingsGoal
 from app.models.server import PairingToken, ServerSettings
 from app.models.transaction import Transaction
 from app.models.user import (
@@ -36,6 +39,9 @@ __all__ = [
     "FinancialAccount",
     "ImportRecord",
     "IncomeSource",
+    "InsightDismissal",
+    "Loan",
+    "LoanPayment",
     "MerchantAlias",
     "NotificationPreference",
     "PROVIDER_NAMES",
@@ -46,8 +52,12 @@ __all__ = [
     "ProviderLinkSecret",
     "RecurringSeries",
     "RevokedToken",
+    "SavingsContribution",
+    "SavingsGoal",
     "ServerSettings",
+    "ShoppingVisit",
     "SyncRun",
+    "TrackedLocation",
     "Transaction",
     "TransactionImport",
     "User",

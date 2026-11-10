@@ -73,6 +73,41 @@ class ReserveItem:
 
 
 @dataclass(frozen=True)
+class LoanReserveItem:
+    """One loan instalment falling due inside the horizon."""
+
+    loan_id: uuid.UUID
+    loan_name: str
+    due_date: date
+    amount: Decimal
+    is_overdue: bool = False
+    is_estimate: bool = False
+    remaining_balance: Decimal = ZERO
+
+
+@dataclass(frozen=True)
+class SavingsReserveItem:
+    """Money protected by a savings goal, or a contribution due before the horizon."""
+
+    goal_id: uuid.UUID
+    name: str
+    amount: Decimal
+    mode: str = "virtual"
+    is_planned_contribution: bool = False
+    due_date: date | None = None
+
+
+@dataclass(frozen=True)
+class CreditCardObligation:
+    """A user-entered minimum payment. Never inferred from the balance."""
+
+    account_id: uuid.UUID
+    name: str
+    minimum_payment: Decimal
+    due_date: date | None = None
+
+
+@dataclass(frozen=True)
 class SafeToSpendInputs:
     today: date
     horizon_end: date
@@ -80,6 +115,9 @@ class SafeToSpendInputs:
     pending: list[PendingItem] = field(default_factory=list)
     bills: list[BillReserveItem] = field(default_factory=list)
     reserves: list[ReserveItem] = field(default_factory=list)
+    loans: list[LoanReserveItem] = field(default_factory=list)
+    savings: list[SavingsReserveItem] = field(default_factory=list)
+    credit_cards: list[CreditCardObligation] = field(default_factory=list)
     minimum_buffer: Decimal = ZERO
     include_pending_debits: bool = True
     payday: date | None = None
@@ -129,6 +167,13 @@ class SafeToSpendResult:
     warnings: list[str]
     explanation: list[ExplanationLine]
     stale_information: bool
+    loan_reserves: Decimal = ZERO
+    savings_reserves: Decimal = ZERO
+    credit_card_reserves: Decimal = ZERO
+    obligations_total: Decimal = ZERO
+    loans: list[dict[str, object]] = field(default_factory=list)
+    savings: list[dict[str, object]] = field(default_factory=list)
+    credit_cards: list[dict[str, object]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -153,6 +198,13 @@ class SafeToSpendResult:
             "warnings": self.warnings,
             "explanation": [line.as_dict() for line in self.explanation],
             "stale_information": self.stale_information,
+            "loan_reserves": str(self.loan_reserves),
+            "savings_reserves": str(self.savings_reserves),
+            "credit_card_reserves": str(self.credit_card_reserves),
+            "obligations_total": str(self.obligations_total),
+            "loans": self.loans,
+            "savings": self.savings,
+            "credit_cards": self.credit_cards,
         }
 
 
@@ -255,9 +307,75 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
         )
     reserve_total = quantize(reserve_total)
 
+    # Loan instalments are their own commitment: a repayment is not a purchase and
+    # must not be lumped in with bills, or a loan that is also recorded as a bill
+    # would be reserved twice.
+    loan_rows: list[dict[str, object]] = []
+    loan_total = ZERO
+    estimated_loans: list[str] = []
+    for loan in sorted(inputs.loans, key=lambda item: (item.due_date, item.loan_name.lower())):
+        loan_total += loan.amount
+        if loan.is_estimate:
+            estimated_loans.append(loan.loan_name)
+        loan_rows.append(
+            {
+                "loan_id": str(loan.loan_id),
+                "name": loan.loan_name,
+                "due_date": loan.due_date.isoformat(),
+                "amount": str(quantize(loan.amount)),
+                "is_overdue": loan.is_overdue,
+                "is_estimate": loan.is_estimate,
+                "remaining_balance": str(quantize(loan.remaining_balance)),
+            }
+        )
+    loan_total = quantize(loan_total)
+
+    savings_rows: list[dict[str, object]] = []
+    savings_total = ZERO
+    for item in inputs.savings:
+        if item.amount <= ZERO:
+            continue
+        savings_total += item.amount
+        savings_rows.append(
+            {
+                "goal_id": str(item.goal_id),
+                "name": item.name,
+                "amount": str(quantize(item.amount)),
+                "mode": item.mode,
+                "is_planned_contribution": item.is_planned_contribution,
+                "due_date": item.due_date.isoformat() if item.due_date else None,
+            }
+        )
+    savings_total = quantize(savings_total)
+
+    credit_rows: list[dict[str, object]] = []
+    credit_total = ZERO
+    for card in inputs.credit_cards:
+        if card.minimum_payment <= ZERO:
+            continue
+        credit_total += card.minimum_payment
+        credit_rows.append(
+            {
+                "account_id": str(card.account_id),
+                "name": card.name,
+                "minimum_payment": str(quantize(card.minimum_payment)),
+                "due_date": card.due_date.isoformat() if card.due_date else None,
+            }
+        )
+    credit_total = quantize(credit_total)
+
     buffer_total = quantize(max(inputs.minimum_buffer, ZERO))
 
-    raw = eligible_balance - pending_debits - bill_total - reserve_total - buffer_total
+    raw = (
+        eligible_balance
+        - pending_debits
+        - bill_total
+        - loan_total
+        - credit_total
+        - reserve_total
+        - savings_total
+        - buffer_total
+    )
     raw = quantize(raw)
     safe_to_spend = clamp_zero(raw)
     shortfall = clamp_zero(-raw)
@@ -299,6 +417,25 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
                 kind="debit",
             )
         )
+    if loan_total > ZERO:
+        lines.append(
+            ExplanationLine(
+                key="loan_reserves",
+                label="Loan and advance repayments due",
+                amount=loan_total,
+                kind="debit",
+                detail=f"{len(loan_rows)} instalment(s)",
+            )
+        )
+    if credit_total > ZERO:
+        lines.append(
+            ExplanationLine(
+                key="credit_card_reserves",
+                label="Credit card minimum payments you set",
+                amount=credit_total,
+                kind="debit",
+            )
+        )
     if reserve_total > ZERO:
         lines.append(
             ExplanationLine(
@@ -306,6 +443,16 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
                 label="Reserved savings and commitments",
                 amount=reserve_total,
                 kind="debit",
+            )
+        )
+    if savings_total > ZERO:
+        lines.append(
+            ExplanationLine(
+                key="savings_reserves",
+                label="Money set aside in savings goals",
+                amount=savings_total,
+                kind="debit",
+                detail=f"{len(savings_rows)} goal(s) and contribution(s)",
             )
         )
     lines.append(
@@ -327,6 +474,11 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
         warnings.append(
             f"{len(overdue)} bill occurrence(s) are overdue and still reserved: "
             + ", ".join(f"{b.bill_name} ({b.due_date.isoformat()})" for b in overdue[:3])
+        )
+    if estimated_loans:
+        warnings.append(
+            "Some loan balances are estimates because repayment terms or principal/interest "
+            "splits are incomplete: " + ", ".join(estimated_loans[:3]) + "."
         )
     if inputs.payday is None:
         warnings.append(
@@ -356,6 +508,13 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
         bill_reserves=bill_total,
         minimum_buffer=buffer_total,
         explicit_reserves=reserve_total,
+        loan_reserves=loan_total,
+        savings_reserves=savings_total,
+        credit_card_reserves=credit_total,
+        obligations_total=quantize(bill_total + loan_total + credit_total),
+        loans=loan_rows,
+        savings=savings_rows,
+        credit_cards=credit_rows,
         raw_amount=raw,
         safe_to_spend=safe_to_spend,
         projected_shortfall=shortfall,

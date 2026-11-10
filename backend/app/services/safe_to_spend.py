@@ -14,10 +14,13 @@ from app.calculations.safe_to_spend import (
     BillReserveItem,
     CategoryAvailability,
     CategoryAvailabilityInputs,
+    CreditCardObligation,
+    LoanReserveItem,
     PendingItem,
     ReserveItem,
     SafeToSpendInputs,
     SafeToSpendResult,
+    SavingsReserveItem,
     calculate_category_availability,
     calculate_safe_to_spend,
 )
@@ -34,6 +37,8 @@ from app.services.balances import balances_for_accounts, spending_by_category
 from app.services.bills import horizon_candidates, next_payday_date
 from app.services.budgets import budget_category_row
 from app.services.errors import NotFoundError
+from app.services.loans import upcoming_payments
+from app.services.savings import list_goals, planned_contributions, protected_amount
 from app.utils.dates import month_bounds, today_in, utc_now
 from app.utils.money import ZERO, quantize
 
@@ -161,6 +166,65 @@ def build_inputs(db: Session, user: User, *, today: date | None = None) -> SafeT
         if row.end_date is None or row.end_date >= today
     ]
 
+    loans = [
+        LoanReserveItem(
+            loan_id=row["loan_id"],
+            loan_name=row["loan_name"],
+            due_date=row["due_date"],
+            amount=row["amount"],
+            is_overdue=bool(row["is_overdue"]),
+            is_estimate=bool(row["is_estimate"]),
+            remaining_balance=row["remaining_balance"],
+        )
+        for row in upcoming_payments(db, user, today=today, horizon_end=horizon_end)
+    ]
+
+    # Savings: a goal protects its money once. ``protected_amount`` already knows
+    # that an excluded savings account needs no further deduction, so the amounts
+    # collected here are exactly the ones the plan should withhold.
+    savings: list[SavingsReserveItem] = []
+    for goal in list_goals(db, user.id):
+        account = next((a for a in accounts if a.id == goal.account_id), None)
+        spendable = None
+        balance = None
+        if goal.account_id is not None:
+            summary = balances.get(goal.account_id)
+            balance = summary.posted_balance if summary else None
+            spendable = bool(account and account.include_in_safe_to_spend) if account else False
+        amount = protected_amount(goal, spendable, balance)
+        if amount > ZERO:
+            savings.append(
+                SavingsReserveItem(
+                    goal_id=goal.id,
+                    name=goal.name,
+                    amount=amount,
+                    mode=goal.mode,
+                )
+            )
+    for contribution in planned_contributions(db, user, today=today, horizon_end=horizon_end):
+        savings.append(
+            SavingsReserveItem(
+                goal_id=contribution["goal_id"],
+                name=contribution["goal_name"],
+                amount=contribution["amount"],
+                mode="virtual",
+                is_planned_contribution=True,
+                due_date=contribution["due_date"],
+            )
+        )
+
+    credit_cards = [
+        CreditCardObligation(
+            account_id=account.id,
+            name=account.name,
+            minimum_payment=quantize(account.minimum_payment),
+        )
+        for account in accounts
+        if account.account_type == AccountType.CREDIT_CARD.value
+        and account.minimum_payment is not None
+        and quantize(account.minimum_payment) > ZERO
+    ]
+
     return SafeToSpendInputs(
         today=today,
         horizon_end=horizon_end,
@@ -168,6 +232,9 @@ def build_inputs(db: Session, user: User, *, today: date | None = None) -> SafeT
         pending=pending,
         bills=bill_reserves,
         reserves=reserves,
+        loans=loans,
+        savings=savings,
+        credit_cards=credit_cards,
         minimum_buffer=quantize(prefs.minimum_balance_buffer) if prefs else ZERO,
         include_pending_debits=prefs.include_pending_debits if prefs else True,
         payday=payday,

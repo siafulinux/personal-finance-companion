@@ -23,7 +23,12 @@ from app.api import (
     imports,
     insights,
     intelligence,
+    loans,
+    obligations,
+    provider_admin,
+    savings,
     server,
+    shopping,
     transactions,
 )
 from app.config import settings
@@ -142,7 +147,12 @@ def create_app() -> FastAPI:
     app.include_router(budgets.router, prefix=API_PREFIX)
     app.include_router(bills.router, prefix=API_PREFIX)
     app.include_router(insights.router, prefix=API_PREFIX)
+    app.include_router(loans.router, prefix=API_PREFIX)
+    app.include_router(savings.router, prefix=API_PREFIX)
+    app.include_router(obligations.router, prefix=API_PREFIX)
+    app.include_router(shopping.router, prefix=API_PREFIX)
     app.include_router(connectivity.router, prefix=API_PREFIX)
+    app.include_router(provider_admin.router, prefix=API_PREFIX)
     app.include_router(intelligence.router, prefix=API_PREFIX)
     app.include_router(assistant.router, prefix=API_PREFIX)
 
@@ -175,7 +185,7 @@ def create_app() -> FastAPI:
             "safe_to_spend_horizon_days": settings.default_safe_to_spend_horizon_days,
             "max_horizon_days": settings.max_safe_to_spend_horizon_days,
             "ai": ai_status(),
-            "phase": 2,
+            "phase": 4,
         }
 
     return app

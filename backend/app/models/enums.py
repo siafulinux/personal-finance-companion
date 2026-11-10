@@ -156,3 +156,54 @@ class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"
     DARK = "dark"
+
+
+class LoanType(StrEnum):
+    PERSONAL = "personal"
+    PAYDAY = "payday"
+    CASH_ADVANCE = "cash_advance"
+    EARNED_WAGE_ACCESS = "earned_wage_access"
+    BNPL = "buy_now_pay_later"
+    INSTALLMENT = "installment"
+    CREDIT_AGREEMENT = "credit_agreement"
+    OTHER = "other"
+
+
+class LoanStatus(StrEnum):
+    ACTIVE = "active"
+    PAID_OFF = "paid_off"
+    DEFAULTED = "defaulted"
+
+
+class BalanceSource(StrEnum):
+    """Where an opening balance came from: the ledger, the user, or a provider."""
+
+    USER = "user"
+    PROVIDER = "provider"
+    DERIVED = "derived"
+
+
+class SavingsMode(StrEnum):
+    """Money kept in place (virtual) versus money held in its own account."""
+
+    VIRTUAL = "virtual"
+    ACCOUNT = "account"
+
+
+class SavingsStatus(StrEnum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class VisitStatus(StrEnum):
+    DETECTED = "detected"
+    SUGGESTED = "suggested"
+    CONFIRMED = "confirmed"
+    IGNORED = "ignored"
+
+
+class LocationSource(StrEnum):
+    GEOFENCE = "geofence"
+    DISCOVERY = "discovery"
+    MANUAL = "manual"

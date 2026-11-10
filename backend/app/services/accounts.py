@@ -51,6 +51,7 @@ def account_payload(account: FinancialAccount, summary: BalanceSummary | None) -
         "opening_balance_date": account.opening_balance_date,
         "include_in_safe_to_spend": account.include_in_safe_to_spend,
         "credit_limit": account.credit_limit,
+        "minimum_payment": account.minimum_payment,
         "description": account.description,
         "institution": account.institution,
         "is_archived": account.is_archived,
@@ -74,6 +75,9 @@ def create_account(db: Session, user_id: uuid.UUID, payload: AccountCreate) -> F
         currency=payload.currency,
         include_in_safe_to_spend=payload.include_in_safe_to_spend,
         credit_limit=quantize(payload.credit_limit) if payload.credit_limit is not None else None,
+        minimum_payment=quantize(payload.minimum_payment)
+        if payload.minimum_payment is not None
+        else None,
         description=payload.description,
         institution=payload.institution,
         sort_order=payload.sort_order,
@@ -116,6 +120,8 @@ def update_account(
     if data.get("is_archived") is False:
         account.archived_at = None
     for field, value in data.items():
+        if field == "minimum_payment" and value is not None:
+            value = quantize(value)
         setattr(account, field, value)
     try:
         db.flush()

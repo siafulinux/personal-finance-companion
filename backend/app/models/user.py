@@ -141,9 +141,27 @@ class NotificationPreference(Base, TimestampMixin):
     quiet_hours_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
     quiet_hours_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
     quiet_hours_timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Phase 5 (Android geofencing) reads these; no location is collected in Phase 1.
+    # Consent record for location-aware Shopping Check. Nothing location-related
+    # runs until the user turns this on in the app.
     location_features_opted_in: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    # Master switch. Consent can stay recorded while the feature is paused.
+    shopping_intelligence_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Low-power discovery of places the user has not tracked yet.
+    discovery_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    notification_cooldown_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="120"
+    )
+    visit_history_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="90"
+    )
+    location_paused_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     user: Mapped[User] = relationship(back_populates="notification_preferences")

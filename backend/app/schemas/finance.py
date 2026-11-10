@@ -26,6 +26,9 @@ class AccountCreate(APIModel):
     currency: str = Field(default="USD", min_length=3, max_length=3)
     include_in_safe_to_spend: bool = True
     credit_limit: Money | None = Field(default=None, ge=0)
+    # A minimum payment the owner typed in. Safe-to-Spend reserves it; nothing
+    # derives it from the balance.
+    minimum_payment: Money | None = Field(default=None, ge=0)
     description: str | None = None
     institution: str | None = None
     sort_order: int = 0
@@ -57,6 +60,7 @@ class AccountUpdate(APIModel):
     opening_balance_date: date | None = None
     include_in_safe_to_spend: bool | None = None
     credit_limit: Money | None = Field(default=None, ge=0)
+    minimum_payment: Money | None = Field(default=None, ge=0)
     description: str | None = None
     institution: str | None = None
     sort_order: int | None = None
@@ -72,6 +76,7 @@ class AccountBalanceOut(ORMModel):
     opening_balance_date: date
     include_in_safe_to_spend: bool
     credit_limit: Decimal | None
+    minimum_payment: Decimal | None = None
     description: str | None
     institution: str | None
     is_archived: bool

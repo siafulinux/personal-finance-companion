@@ -43,6 +43,9 @@ class FinancialAccount(Base, UUIDPrimaryKey, TimestampMixin):
         Boolean, nullable=False, server_default=text("true")
     )
     credit_limit: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
+    # A user-entered minimum payment for a credit card. Safe-to-Spend reserves it
+    # when set; it is never inferred from the balance.
+    minimum_payment: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     institution: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

@@ -159,6 +159,18 @@ def create_transaction(
         TransactionType.BILL_PAYMENT.value,
     ):
         match_info = match_transaction(db, user, txn)
+        # A repayment is linked only when one loan matches on amount and date with
+        # no close runner-up, and only when no bill has already claimed the money.
+        # The link is reported back rather than made silently.
+        from app.services.loan_matching import auto_match_transaction
+
+        loan_payment = auto_match_transaction(db, user, txn)
+        if loan_payment is not None:
+            match_info = match_info or {}
+            match_info["loan_payment"] = {
+                "loan_id": str(loan_payment.loan_id),
+                "payment_id": str(loan_payment.id),
+            }
     return txn, match_info
 
 
