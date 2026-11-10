@@ -2,6 +2,7 @@ package com.pfc.companion.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -283,10 +284,18 @@ private fun LoanCard(
             )
         }
         HorizontalGap(10)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onPay, enabled = !busy) { Text("Record payment") }
-            TextButton(onClick = onReview, enabled = !busy) { Text("Matches") }
-            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove") }
+        // FlowRow, not Row: a Row squeezes each button's intrinsic width when the
+        // three actions do not fit, and a squeezed Text breaks a single word
+        // mid-word ("Remov" / "e"). Flowing keeps every label on one line and
+        // moves a button to the next line as a whole instead.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Button(onClick = onPay, enabled = !busy) { Text("Record payment", maxLines = 1) }
+            TextButton(onClick = onReview, enabled = !busy) { Text("Matches", maxLines = 1) }
+            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove", maxLines = 1) }
         }
         if (loan.interestPaid != "0.00" || loan.feesPaid != "0.00") {
             HorizontalGap(6)
