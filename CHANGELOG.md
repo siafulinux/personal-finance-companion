@@ -55,7 +55,48 @@ deterministic; the assistant only explains it.
 
 ---
 
-## [Unreleased] — administrator-managed financial providers
+## [0.6.2] — 2026-11-11 — release plumbing and the walkthrough defects
+
+Two threads: making a release something the repository verifies rather than something a human
+remembers to check, and clearing what the Phase 4 walkthroughs turned up. No version number in
+the API or the Android manifest changes — this is plumbing and repairs.
+
+### Added
+
+- **Teller live-verification harness** (`backend/scripts/verify_teller_live.py`): links an
+  institution, syncs it and disconnects against the real API step by step, and refuses to
+  report success for any step it could not run. Its fail-closed paths — missing configuration,
+  a non-sandbox environment, an unreachable provider — have unit tests of their own.
+- **Nightly CI** at 03:17 UTC against the default branch. Some breakage needs no push: a
+  dependency publishing a breaking release, a test that only fails on one calendar date, a
+  fixture that aged out. The schedule surfaces those overnight instead of during a release.
+- **Android build-time address check** in CI: the app is assembled with `-PpfcApiBaseUrl` and
+  the APK's dex is searched for the value, so a broken override fails the step rather than
+  shipping an APK that still points at the emulator.
+- **Plan tab** in Android, indexing Loans, Savings and Obligations. They were reachable only
+  from a card low on the dashboard, which meant scrolling past the summary to find them and no
+  route back once that card changed.
+
+### Fixed
+
+- **Deleting an account that has budgets** no longer deletes the budgets and their allocations
+  twice. The backend suite now treats `SAWarning` as an error, so an "expected to delete N
+  row(s); 0 were matched" cannot pass unnoticed a second time.
+- **Insight empty states** no longer say a merchant's pattern is too weak while listing
+  high-confidence findings above them; the message follows the history that actually exists.
+- **Loan action row** flows to a second line instead of breaking a label mid-word
+  ("Remov" / "e") when the three buttons do not fit on a narrow screen.
+- **Android server address** can be baked in at build time with `-PpfcApiBaseUrl`, instead of
+  the emulator loopback being the only default, and it is validated before it reaches the app.
+
+### Changed
+
+- PostgreSQL is published on `127.0.0.1:${PFC_DB_PORT:-5433}` for host-side diagnostics. It
+  stays loopback-only, and `docs/remote-access.md` no longer claims no host port exists.
+
+---
+
+## [0.6.1] — 2026-11-10 — administrator-managed financial providers
 
 The server owner now configures Teller (primary) and Plaid (fallback) once; users connect an
 institution without ever choosing a provider.
