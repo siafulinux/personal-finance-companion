@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app.api import server as server_api
 from app.config import settings
+from app.version import RELEASE_TAG
 
 SETUP = {
     "server_name": "Home Finance",
@@ -47,6 +48,10 @@ def test_info_is_public_and_reveals_no_secrets(client):
     assert body["status"] == "ok"
     assert body["api_base_url"].endswith("/api/v1")
     assert body["version"] and body["api_version"] >= 1
+    # The release tag is public on purpose: it names the source this build came
+    # from, so an installation can be identified without shell access.
+    assert body["release_tag"] == RELEASE_TAG
+    assert body["release_tag"].startswith("v")
     # The endpoint is unauthenticated: it must not describe the database, the
     # secret key, cookies or any account.
     lowered = response.text.lower()

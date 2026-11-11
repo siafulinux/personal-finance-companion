@@ -728,6 +728,7 @@ export interface ServerInfo {
   app_name: string;
   server_name: string;
   version: string;
+  release_tag: string;
   api_version: number;
   min_client_api_version: number;
   api_base_url: string;

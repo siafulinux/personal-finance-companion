@@ -28,7 +28,7 @@ from app.models.server import SETTINGS_ID
 from app.services.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from app.services.users import register_user
 from app.utils.dates import utc_now
-from app.version import API_VERSION, APP_VERSION, MIN_CLIENT_API_VERSION
+from app.version import API_VERSION, APP_VERSION, MIN_CLIENT_API_VERSION, RELEASE_TAG
 
 #: A pairing code is meant to be read off a screen and typed within a minute or two.
 PAIRING_TTL_MINUTES = 10
@@ -148,6 +148,7 @@ def server_info(db: Session, request) -> dict:
         "app_name": settings.app_name,
         "server_name": server_name(db),
         "version": APP_VERSION,
+        "release_tag": RELEASE_TAG,
         "api_version": API_VERSION,
         "min_client_api_version": MIN_CLIENT_API_VERSION,
         "api_base_url": f"{base}/api/v1",
