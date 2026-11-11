@@ -72,6 +72,31 @@ def _ext(item_id: str, kind: str, index: int) -> str:
     return f"sbx-{_seed(item_id):08x}-{kind}-{index:03d}"
 
 
+def _monthly_occurrences(today: date, day_of_month: int, count: int = 3) -> list[date]:
+    """The newest ``count`` monthly dates at or before today, oldest first.
+
+    Three occurrences are what makes a monthly series detectable, and a fixed 90-day
+    window does not always hold three: when today falls before a merchant's billing
+    day, the oldest of the three sits a day or two before the window starts. Asking
+    for the newest three instead keeps every monthly fixture detectable on any date,
+    at the cost of at most a couple of days of overspill at the oldest end.
+    """
+    dates: list[date] = []
+    month_offset = 0
+    while len(dates) < count:
+        month_start = add_months(today.replace(day=1), -month_offset)
+        try:
+            when = month_start.replace(day=day_of_month)
+        except ValueError:  # pragma: no cover - day_of_month is always valid
+            when = None
+        if when is not None and when <= today:
+            dates.append(when)
+        month_offset += 1
+        if month_offset > count + 2:  # pragma: no cover - defensive guard
+            break
+    return sorted(dates)
+
+
 def _history(item_id: str, today: date) -> list[ProviderTransactionData]:
     """Deterministic ~90 day history, newest last."""
     rng = random.Random(_seed(item_id))
@@ -123,23 +148,17 @@ def _history(item_id: str, today: date) -> list[ProviderTransactionData]:
         payday += timedelta(days=14)
 
     # Monthly subscriptions on the credit card: the recurring-detection fixtures.
-    for month_offset in range(4):
-        for merchant, description, day_of_month, amount, category in _SUBSCRIPTIONS:
-            month_start = add_months(today.replace(day=1), -month_offset)
-            try:
-                when = month_start.replace(day=day_of_month)
-            except ValueError:  # pragma: no cover - day_of_month is always valid
-                continue
-            if start <= when <= today:
-                add(
-                    day=when,
-                    account=CREDIT,
-                    description=description,
-                    amount=amount,
-                    tx_type="purchase",
-                    merchant=merchant,
-                    provider_category=category,
-                )
+    for merchant, description, day_of_month, amount, category in _SUBSCRIPTIONS:
+        for when in _monthly_occurrences(today, day_of_month):
+            add(
+                day=when,
+                account=CREDIT,
+                description=description,
+                amount=amount,
+                tx_type="purchase",
+                merchant=merchant,
+                provider_category=category,
+            )
 
     # Weekly groceries in varying amounts (drives personalisation fixtures).
     for week in range(_HISTORY_DAYS // 7):
@@ -156,20 +175,20 @@ def _history(item_id: str, today: date) -> list[ProviderTransactionData]:
             provider_category="FOOD_AND_DRINK",
         )
 
-    # Monthly household purchases at one store, with one clear overspend month.
-    for month_offset in range(3):
-        when = add_months(today.replace(day=1), -month_offset).replace(day=16)
-        if start <= when <= today:
-            bump = Decimal("180.00") if month_offset == 0 else Decimal("0")
-            add(
-                day=when,
-                account=CREDIT,
-                description="TARGET 00021498",
-                amount=quantize(Decimal("118.75") + bump),
-                tx_type="purchase",
-                merchant="Target",
-                provider_category="GENERAL_MERCHANDISE",
-            )
+    # Monthly household purchases at one store, with one clear overspend month: the
+    # current one, whenever in the month this history is generated.
+    for when in _monthly_occurrences(today, 16):
+        current_month = (when.year, when.month) == (today.year, today.month)
+        bump = Decimal("180.00") if current_month else Decimal("0")
+        add(
+            day=when,
+            account=CREDIT,
+            description="TARGET 00021498",
+            amount=quantize(Decimal("118.75") + bump),
+            tx_type="purchase",
+            merchant="Target",
+            provider_category="GENERAL_MERCHANDISE",
+        )
 
     # Frequent small coffee purchases: the "repeated small purchases" signal.
     for day_offset in range(0, _HISTORY_DAYS, 3):
@@ -187,45 +206,41 @@ def _history(item_id: str, today: date) -> list[ProviderTransactionData]:
         )
 
     # A fuel fill each month.
-    for month_offset in range(3):
-        when = add_months(today.replace(day=1), -month_offset).replace(day=9)
-        if start <= when <= today:
-            add(
-                day=when,
-                account=CHECKING,
-                description="SHELL OIL 5744192",
-                amount=quantize(Decimal("52.10") + Decimal(rng.randint(0, 900)) / 100),
-                tx_type="purchase",
-                merchant="Shell",
-                provider_category="TRANSPORTATION",
-            )
+    for when in _monthly_occurrences(today, 9):
+        add(
+            day=when,
+            account=CHECKING,
+            description="SHELL OIL 5744192",
+            amount=quantize(Decimal("52.10") + Decimal(rng.randint(0, 900)) / 100),
+            tx_type="purchase",
+            merchant="Shell",
+            provider_category="TRANSPORTATION",
+        )
 
     # A transfer to savings, monthly: must never count as spending. Both legs are
     # reported, as a real institution does, so the sync engine can pair them into a
     # single internal transfer instead of two unrelated cash movements.
-    for month_offset in range(3):
-        when = add_months(today.replace(day=1), -month_offset).replace(day=25)
-        if start <= when <= today:
-            add(
-                day=when,
-                account=CHECKING,
-                description="TRANSFER TO SAVINGS",
-                amount=Decimal("200.00"),
-                tx_type="transfer_out",
-                merchant=None,
-                provider_category="TRANSFER_OUT",
-                kind="out",
-            )
-            add(
-                day=when,
-                account=SAVINGS,
-                description="TRANSFER FROM CHECKING",
-                amount=Decimal("200.00"),
-                tx_type="transfer_in",
-                merchant=None,
-                provider_category="TRANSFER_IN",
-                kind="in",
-            )
+    for when in _monthly_occurrences(today, 25):
+        add(
+            day=when,
+            account=CHECKING,
+            description="TRANSFER TO SAVINGS",
+            amount=Decimal("200.00"),
+            tx_type="transfer_out",
+            merchant=None,
+            provider_category="TRANSFER_OUT",
+            kind="out",
+        )
+        add(
+            day=when,
+            account=SAVINGS,
+            description="TRANSFER FROM CHECKING",
+            amount=Decimal("200.00"),
+            tx_type="transfer_in",
+            merchant=None,
+            provider_category="TRANSFER_IN",
+            kind="in",
+        )
 
     rows.sort(key=lambda r: (r.txn_date, r.external_id))
     return rows

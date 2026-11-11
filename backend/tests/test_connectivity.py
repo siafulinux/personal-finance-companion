@@ -50,6 +50,36 @@ def _drain(db, user, link):
             return run
 
 
+@pytest.mark.parametrize(
+    "today",
+    [
+        date(2026, 1, 1),
+        date(2026, 2, 28),
+        date(2026, 11, 11),
+        date(2026, 11, 12),
+        date(2026, 11, 25),
+        date(2026, 12, 31),
+    ],
+)
+def test_sandbox_subscriptions_stay_detectable_on_any_date(today):
+    """The fixtures must carry three occurrences whatever day the suite runs.
+
+    Recurring detection needs three occurrences and two gaps. A fixed 90-day window
+    does not always hold three: on 2026-11-11 Netflix, billed on the 12th, had only
+    two inside it, so detection found nothing and CI failed on the calendar rather
+    than on a change. This pins that: every monthly fixture keeps three occurrences
+    dated on or before the run date, and none of them is older than three months.
+    """
+    from app.providers.sandbox import _SUBSCRIPTIONS, _history
+
+    rows = _history("sandbox-item", today)
+    for merchant, *_ in _SUBSCRIPTIONS:
+        dates = sorted(row.txn_date for row in rows if row.merchant == merchant)
+        assert len(dates) >= 3, f"{merchant} has only {len(dates)} occurrences on {today}"
+        assert max(dates) <= today
+        assert (today - min(dates)).days <= 95, f"{merchant} reaches back to {min(dates)}"
+
+
 def test_connect_imports_accounts_and_encrypts_token(db, user):
     link, accounts, run = _connect(db, user)
 
