@@ -14,7 +14,7 @@ API_VERSION = 1
 #: /server/info so an installation can be identified — and its source found —
 #: without shell access to the host. Bump it with the tag, not with APP_VERSION:
 #: the product version and the release tag move independently.
-RELEASE_TAG = "v0.6.0"
+RELEASE_TAG = "v0.6.3"
 
 # The oldest client API generation this server still serves.
 MIN_CLIENT_API_VERSION = 1
