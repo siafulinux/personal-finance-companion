@@ -1,0 +1,165 @@
+name: Release
+
+# A tag names a release, so the notes are generated from CHANGELOG.md rather than
+# typed into the GitHub form: one source, and a tag with no changelog entry fails
+# instead of publishing an empty release.
+#
+# Publishing is refused unless the tagged commit's CI run passed. Scripts
+# (.githooks/pre-push, scripts/tag-release) already enforce that on the machine
+# that cuts the tag, but a tag can be pushed from anywhere, so the rule is
+# repeated here rather than assumed.
+#
+# Nothing is attached: the APK is signed with a key that deliberately stays off
+# CI, so the artifact is uploaded by hand after `apksigner verify`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release
+  actions: read # read the CI run for the tagged commit
+
+# One release per tag, and never two at once. A re-pushed tag waits rather than
+# cancelling, because the cancel would look like a failure in the Actions list.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Tagged commit is green
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag is annotated, so its tag object has to exist locally for
+          # verify-ci to peel it to a commit.
+          fetch-depth: 0
+      - name: Check the CI run for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/verify-ci "${{ github.ref_name }}"
+
+  versions:
+    # A tag that disagrees with the repository is a release nobody can identify:
+    # the APK says one version, the changelog starts at another, and the tag
+    # names a third. Reading three numbers is cheap; discovering the mismatch
+    # from an install is not.
+    name: Tag matches the manifest and changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare the tag with the Android version and the changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+
+          android=$(sed -n 's/^ *versionName *= *"\([^"]*\)".*/\1/p' \
+            android/app/build.gradle.kts | head -1)
+          newest=$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')
+
+          printf '%-22s %s\n' tag "$TAG"
+          printf '%-22s %s\n' 'Android versionName' "${android:-<unreadable>}"
+          printf '%-22s %s\n' 'newest CHANGELOG' "${newest:-<none>}"
+
+          status=0
+          if [ -z "$android" ]; then
+            echo "::error::Could not read versionName from android/app/build.gradle.kts."
+            status=1
+          elif [ "$android" != "$version" ]; then
+            echo "::error::The Android manifest reports $android, but this tag is $TAG. Bump versionName so an install can be traced to a release."
+            status=1
+          fi
+
+          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$version]' section, so this release would ship without notes."
+            status=1
+          elif [ "$newest" != "$version" ]; then
+            echo "::error::The newest CHANGELOG heading is [$newest], not [$version]. Add the section for this release at the top."
+            status=1
+          fi
+
+          exit $status
+
+  publish:
+    name: Publish release
+    needs: [verify, versions]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the changelog entry for this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - "$TAG" <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          tag = sys.argv[1]
+          version = tag[1:] if tag.startswith("v") else tag
+
+          lines = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          heading_re = re.compile(r"^## \[([^\]]+)\]")
+          start = next(
+              (i for i, line in enumerate(lines) if (m := heading_re.match(line)) and m.group(1) == version),
+              None,
+          )
+          if start is None:
+              sys.exit(
+                  f"No CHANGELOG.md section for {version}. Add '## [{version}] — <date> — <title>' "
+                  "before tagging, so the release says what changed."
+              )
+
+          end = next(
+              (j for j in range(start + 1, len(lines)) if heading_re.match(lines[j])),
+              len(lines),
+          )
+          section = "\n".join(lines[start + 1 : end])
+          # Entries are separated by a horizontal rule; it belongs to the layout,
+          # not to this release's notes.
+          section = re.sub(r"\n\s*-{3,}\s*$", "", section).strip()
+          if not section:
+              sys.exit(f"The CHANGELOG.md section for {version} is empty.")
+
+          # '## [0.6.3] — 2026-11-11 — release identification' becomes
+          # '0.6.3 — release identification', matching the existing releases
+          # ('0.6.0 — Phase 4 financial intelligence'). The date is left to the
+          # tag; a heading with no title part falls back to the version alone.
+          heading = lines[start]
+          parts = [part.strip() for part in heading.split("—")]
+          title = f"{version} — {parts[-1]}" if len(parts) >= 3 and parts[-1] else version
+
+          pathlib.Path("/tmp/release-title.txt").write_text(title + "\n", encoding="utf-8")
+          pathlib.Path("/tmp/release-notes.md").write_text(section + "\n", encoding="utf-8")
+          print(f"Read {len(section)} characters of notes for {version}.")
+          PY
+          printf 'Title: %s\n' "$(cat /tmp/release-title.txt)"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # A re-pushed tag must not overwrite notes that were edited on GitHub
+          # after the release went out (checksums, artifact details), so an
+          # existing release is left alone.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::A release for $TAG already exists; leaving its notes untouched."
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --title "$(cat /tmp/release-title.txt)" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag
