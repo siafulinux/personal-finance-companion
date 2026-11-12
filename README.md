@@ -164,6 +164,7 @@ The backend suite runs against a separate `finance_test` database and covers the
 
 Published releases, with the notes generated from `CHANGELOG.md`:
 
+- [v0.6.5 — CI answers the merge queue](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.5)
 - [v0.6.4 — a provider that cannot connect anybody says so](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.4)
 - [v0.6.3 — release identification](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.3)
 - [v0.6.2 — release plumbing and the walkthrough defects](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.2)
