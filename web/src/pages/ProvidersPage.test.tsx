@@ -170,3 +170,55 @@ describe("ProvidersPage credential editor", () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ProvidersPage readiness warning", () => {
+  const WARNING = /Not ready to connect anyone yet/;
+
+  it("warns when a provider is switched on but its credentials were never saved", async () => {
+    overview.mockResolvedValue(data(plaid({ enabled: true, configured: false })));
+    renderPage();
+
+    expect(await screen.findByText(WARNING)).toBeInTheDocument();
+    expect(
+      screen.getByText(/client_id and secret are not saved/)
+    ).toBeInTheDocument();
+  });
+
+  it("warns when credentials are saved but the provider was never tested", async () => {
+    overview.mockResolvedValue(
+      data(plaid({ enabled: true, configured: true, source: "database", missing: [], last_test: null }))
+    );
+    renderPage();
+
+    expect(await screen.findByText(WARNING)).toBeInTheDocument();
+    expect(screen.getByText(/never been tested/)).toBeInTheDocument();
+    // The card badge agrees with the warning above it.
+    expect(screen.getByText("Untested")).toBeInTheDocument();
+  });
+
+  it("stays quiet once a provider has been tested", async () => {
+    overview.mockResolvedValue(
+      data(
+        plaid({
+          enabled: true,
+          configured: true,
+          source: "database",
+          missing: [],
+          last_test: { at: "2026-11-11T08:00:00Z", ok: true, message: "Directory answered.", detail: {} },
+        })
+      )
+    );
+    renderPage();
+
+    await screen.findByText("Ready");
+    expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+  });
+
+  it("does not nag about a provider the administrator deliberately switched off", async () => {
+    overview.mockResolvedValue(data(plaid({ enabled: false, configured: false })));
+    renderPage();
+
+    await screen.findByText("Needs credentials");
+    expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+  });
+});

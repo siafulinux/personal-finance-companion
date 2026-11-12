@@ -162,6 +162,13 @@ The backend suite runs against a separate `finance_test` database and covers the
 
 ## Release tags
 
+Published releases, with the notes generated from `CHANGELOG.md`:
+
+- [v0.6.4 — a provider that cannot connect anybody says so](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.4)
+- [v0.6.3 — release identification](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.3)
+- [v0.6.2 — release plumbing and the walkthrough defects](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.2)
+- [v0.6.1 — administrator-managed financial providers](https://github.com/siafulinux/personal-finance-companion/releases/tag/v0.6.1)
+
 Tag pushes do not start CI, so a release tag is only trustworthy if the commit under it was
 already verified on a branch. Three small tools enforce that:
 
@@ -174,6 +181,12 @@ git config core.hooksPath .githooks   # once per clone
 `.githooks/pre-push` runs the same check for every tag being pushed (and only for tags), so
 `git tag` + `git push` cannot slip an unverified release through. A tag whose CI run is still
 in progress is refused with a message saying so; push the commit as a branch and wait.
+
+The **newest** run for the commit decides. A commit collects a run per event, so an older
+pass can sit next to a newer failure — a workflow change, a dependency release or a
+date-dependent test breaking the suite after that pass. Any historical success would be a
+stale verdict, so `verify-ci` refuses with the failing conclusion and says the older pass
+does not count.
 
 One push produces **one** run, for the commit at its tip — not one run per commit. Pushing
 three commits verifies only the third; the two beneath it have no run of their own, so a tag

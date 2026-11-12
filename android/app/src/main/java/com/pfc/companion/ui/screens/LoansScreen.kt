@@ -269,7 +269,13 @@ private fun LoanCard(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         HorizontalGap(10)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // FlowRow, not Row: "Confirmed balance" plus "Payoff ~28 Feb 2027" is wider than
+        // a phone card, and a Row shrinks each pill instead of wrapping, so the labels
+        // ran into each other. Flowing puts the second pill on its own line whole.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             if (loan.balanceIsEstimate) Pill("Estimated balance", PillTone.Warning) else Pill("Confirmed balance", PillTone.Positive)
             if (loan.payoffIsEstimate && loan.estimatedPayoffDate != null) {
                 Pill("Payoff ~${formatDate(loan.estimatedPayoffDate)}", PillTone.Neutral)
