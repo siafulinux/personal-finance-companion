@@ -2,6 +2,7 @@ package com.pfc.companion.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -250,9 +251,16 @@ private fun GoalCard(
             )
         }
         HorizontalGap(10)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onContribute, enabled = !busy) { Text("Add money") }
-            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove") }
+        // FlowRow, not Row: two actions squeeze each other on a narrow card, and a
+        // squeezed label breaks mid-word ("Remov" / "e"). Flowing moves a button to
+        // the next line whole instead.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Button(onClick = onContribute, enabled = !busy) { Text("Add money", maxLines = 1) }
+            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove", maxLines = 1) }
         }
     }
 }
