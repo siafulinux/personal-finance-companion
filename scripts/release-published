@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Answer whether a tag already has a published release.
+#
+#   scripts/release-published v0.6.2    # exit 0, prints the release URL
+#   scripts/release-published v0.9.9    # exit 1, no such release
+#
+# Exists for the release workflow: a tag that was re-pointed after its release
+# went out can never publish anything again, because the publish job leaves an
+# existing release alone. Running the first-publication gates against it turns
+# the Actions list red for a change that ships nothing, so the workflow asks
+# this question first and warns instead of failing.
+#
+# Exit codes: 0 published, 1 not published, 2 cannot tell (no gh, no auth, or an
+# answer that is neither 200 nor 404). The failure direction matters: a network
+# error must not be read as "not published", or the gates would be skipped.
+set -euo pipefail
+
+usage() {
+  sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+fail() {
+  printf 'release-published: %s\n' "$*" >&2
+  exit 2
+}
+
+[ $# -ge 1 ] || usage
+tag=$1
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed."
+
+repository=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) ||
+  fail "cannot read the GitHub repository for origin (check 'gh auth status')."
+
+# The status line is read rather than the exit code: `gh api` fails for a 404
+# and for a network error alike, and those two answers pull in opposite
+# directions here.
+status=$(gh api --include "repos/${repository}/releases/tags/${tag}" 2>/dev/null |
+  head -1 | awk '{print $2}') || true
+[ -n "${status:-}" ] || fail "cannot read the releases of ${repository} (check 'gh auth status')."
+
+case $status in
+  200)
+    url=$(gh api "repos/${repository}/releases/tags/${tag}" --jq .html_url 2>/dev/null) || url=""
+    printf 'release-published: %s already has a release%s\n' "$tag" "${url:+: $url}"
+    exit 0
+    ;;
+  404)
+    printf 'release-published: %s has no release yet\n' "$tag"
+    exit 1
+    ;;
+  *)
+    fail "GitHub answered ${status} for the release of ${tag}; treating that as unknown."
+    ;;
+esac
