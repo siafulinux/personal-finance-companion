@@ -518,7 +518,12 @@ class TellerProvider(ProviderAdapter):
             return Decimal("0")
 
     def sync_page(
-        self, access_token: str, cursor: str | None, count: int = 100
+        self,
+        access_token: str,
+        cursor: str | None,
+        count: int = 100,
+        *,
+        today: date | None = None,
     ) -> TransactionDelta:
         """Re-read a date window for every account.
 
@@ -526,8 +531,11 @@ class TellerProvider(ProviderAdapter):
         looks ``OVERLAP_DAYS`` behind it. Rows are reported as additions; the sync
         engine's stable-identifier dedupe skips what it already holds and reconciles a
         pending row whose posted form arrives under the same id.
+
+        The window ends on the user's local date rather than the server's, so a server
+        running ahead of them does not ask for tomorrow's activity.
         """
-        today = date.today()
+        today = today or date.today()
         start = today - timedelta(days=INITIAL_HISTORY_DAYS)
         if cursor and cursor.startswith(_CURSOR_PREFIX):
             try:

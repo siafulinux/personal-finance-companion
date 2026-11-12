@@ -405,10 +405,17 @@ class SandboxProvider(ProviderAdapter):
         return events
 
     def sync_page(
-        self, access_token: str, cursor: str | None, count: int = 100
+        self,
+        access_token: str,
+        cursor: str | None,
+        count: int = 100,
+        *,
+        today: date | None = None,
     ) -> TransactionDelta:
         item_id = access_token.replace("sbx-access-", "sbx-item-")
-        today = date.today()
+        # The caller's date, so the simulated history never reaches past the day the
+        # user is in. Falling back to the server clock keeps direct calls testable.
+        today = today or date.today()
         current = generation_of(item_id)
 
         # A missing cursor means "from the beginning", which is how a forced full
