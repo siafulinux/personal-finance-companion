@@ -363,7 +363,13 @@ class SandboxProvider(ProviderAdapter):
             ),
         }
 
-    def complete_link(self, public_token: str, payload: dict | None = None) -> LinkResult:
+    def complete_link(
+        self,
+        public_token: str,
+        payload: dict | None = None,
+        *,
+        today: date | None = None,
+    ) -> LinkResult:
         if not public_token or not public_token.startswith("sbx-link-"):
             raise ProviderError(
                 "The sandbox link token is not valid for this flow.",
@@ -376,7 +382,11 @@ class SandboxProvider(ProviderAdapter):
             external_item_id=f"sbx-item-{seed}",
             institution_name="Sandbox Credit Union",
             institution_id="ins_sandbox_credit_union",
-            history_start=institution_today() - timedelta(days=_HISTORY_DAYS),
+            # The user's day, so the window and the opening balance it dates never sit
+            # in their future because this host's clock runs ahead of theirs. Direct
+            # calls with no user still land on the institution's calendar rather than
+            # the host's.
+            history_start=(today or institution_today()) - timedelta(days=_HISTORY_DAYS),
         )
 
     def list_accounts(self, access_token: str) -> list[ProviderAccountData]:

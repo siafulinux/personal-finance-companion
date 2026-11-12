@@ -143,12 +143,26 @@ class ProviderAdapter(ABC):
         """
 
     @abstractmethod
-    def complete_link(self, public_token: str, payload: dict | None = None) -> LinkResult:
+    def complete_link(
+        self,
+        public_token: str,
+        payload: dict | None = None,
+        *,
+        today: date | None = None,
+    ) -> LinkResult:
         """Exchange the user's approval for a long-lived access token.
 
         ``public_token`` is the credential the provider's own flow returned. ``payload``
         carries the rest of the provider's hand-off for adapters that mint their token in
         the client instead of exchanging one server-side (Teller Connect does this).
+
+        ``today`` is the *user's* local date, not the server's, for the same reason
+        ``sync_page`` takes it: ``history_start`` is ``today`` minus the adapter's
+        history window, and the caller dates the opening balance of every account from
+        it. A server clock ahead of the user (a UTC container, an evening in the
+        Americas) would otherwise open a connection whose window, and whose opening
+        balance, start in the user's future, where every "up to today" query drops
+        them. Adapters that let the provider decide the window ignore it.
         """
 
     @abstractmethod
