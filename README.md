@@ -198,6 +198,11 @@ date, or a fixture that aged out. Scheduled runs always use the default branch's
 workflow, and GitHub disables the schedule after 60 days without repository activity — the
 next push turns it back on.
 
+A red night also files an issue. The `Nightly failure alert` job runs only for a failed
+schedule, and updates one open `ci-nightly` issue rather than opening a new one each night:
+a duplicate per red run would bury the same breakage. The issue carries the run link, each
+job's result and the local commands to reproduce it.
+
 A red night blocks the next merge. The `Nightly suite is green` job runs on every pull
 request, reads the most recent completed scheduled run and fails while that run is red, so a
 broken `master` cannot be merged over. The nightly itself cannot be the required check: a
