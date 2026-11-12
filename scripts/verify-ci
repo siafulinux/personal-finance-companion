@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Fail unless the commit behind a ref has a passing CI run on GitHub.
 #
+# The NEWEST run for the commit decides. A commit can collect several runs -- a
+# push and a pull request each start one -- so an older pass can sit next to a
+# newer failure when a workflow change, a dependency release or a date-dependent
+# test broke the suite after that pass. Counting any historical success as
+# verification would let exactly that failure through.
+#
 #   scripts/verify-ci HEAD
 #   scripts/verify-ci v0.5.0
 #
@@ -34,19 +40,29 @@ runs=$(gh api "repos/${repository}/actions/runs?head_sha=${sha}&per_page=100" \
   --jq '[.workflow_runs[] | select(.name == "CI")]' 2>/dev/null) ||
   fail "cannot list workflow runs for ${repository} (check 'gh auth status')."
 
-conclusion=$(printf '%s' "$runs" | python3 -c '
+# Two values: the verdict, then whether an older run for the same commit passed.
+# The flag exists so a refusal can say why a visible green run did not save it.
+verdict=$(printf '%s' "$runs" | python3 -c '
 import json, sys
 runs = json.load(sys.stdin)
 if not runs:
-    print("none")
+    print("none\t0")
     sys.exit()
-if any(run.get("conclusion") == "success" for run in runs):
-    print("success")
-elif any(run.get("status") != "completed" for run in runs):
-    print("running")
+
+# created_at is the only ordering the API guarantees is meaningful here; the
+# list is otherwise whatever order the endpoint returns.
+ordered = sorted(runs, key=lambda run: run.get("created_at") or "", reverse=True)
+newest = ordered[0]
+older_success = 1 if any(r.get("conclusion") == "success" for r in ordered[1:]) else 0
+
+if newest.get("status") != "completed":
+    verdict = "running"
 else:
-    print(runs[0].get("conclusion") or "unknown")
+    verdict = newest.get("conclusion") or "unknown"
+print(verdict + "\t" + str(older_success))
 ')
+conclusion=${verdict%%$'\t'*}
+older_success=${verdict##*$'\t'}
 
 short=${sha:0:8}
 case "$conclusion" in
@@ -63,6 +79,10 @@ case "$conclusion" in
     ;;
   *)
     printf 'verify-ci: the newest CI run for %s concluded "%s".\n' "$short" "$conclusion" >&2
+    if [ "$older_success" = 1 ]; then
+      printf '           An older run for this commit passed, but that is a stale result:\n' >&2
+      printf '           the newest run is what counts. Fix the failure and push again.\n' >&2
+    fi
     exit 1
     ;;
 esac

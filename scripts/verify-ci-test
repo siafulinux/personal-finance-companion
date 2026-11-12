@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# Regression tests for scripts/verify-ci, the gate's definition of "green".
+#
+#   scripts/verify-ci-test
+#
+# verify-ci decides a commit's fate from the NEWEST CI run for it, and refuses in
+# several distinct ways. Its exit code is what .githooks/pre-push,
+# scripts/tag-release and the Release workflow all act on, so a silent regression
+# here lets a red commit be tagged -- the exact outcome the gate exists to prevent.
+#
+# A fake `gh` on PATH serves canned API payloads, and the real `jq` applies the
+# same --jq expression the real CLI would, so the workflow filter is exercised
+# rather than bypassed. Nothing here touches GitHub or needs credentials.
+#
+#   case                                                     exit  meaning
+#   1  newest run passed                                      0  green
+#   2  newest run failed                                      1  refused
+#   3  newest failed, an older run passed                     1  refused, names the stale pass
+#   4  no run exists for the commit                           1  refused
+#   5  newest run is still going                              1  refused, says to wait
+#   6  cannot verify (no gh installed, or an unknown ref)     2  cannot verify
+#
+# Exit codes: 0 every case behaves as intended, 1 a case regressed,
+# 2 cannot run (no git, jq or python3).
+set -euo pipefail
+
+fail() {
+  printf 'verify-ci-test: %s\n' "$*" >&2
+  exit 2
+}
+
+for tool in git jq python3; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is required to run these cases."
+done
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+verify=$root/scripts/verify-ci
+[ -x "$verify" ] || fail "no executable at $verify."
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# --- a stand-in for the GitHub CLI -------------------------------------------
+
+mkdir -p "$work/bin" "$work/nogh"
+cat >"$work/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+# `repo view` names a repository; `api` applies the caller's jq expression to the
+# payload in $FAKE_RUNS, which is what the real command prints.
+set -euo pipefail
+case "${1:-}" in
+  repo)
+    if [ "${2:-}" = "view" ]; then
+      printf '%s\n' "${FAKE_REPO:-octo/repo}"
+      exit 0
+    fi
+    ;;
+  api)
+    url=${2:-}
+    shift 2
+    expression=
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --jq)
+          expression=${2:-}
+          shift 2
+          ;;
+        *) shift ;;
+      esac
+    done
+    case "$url" in
+      */actions/runs*) ;;
+      *)
+        printf 'fake gh: unexpected URL: %s\n' "$url" >&2
+        exit 1
+        ;;
+    esac
+    if [ -n "$expression" ]; then
+      printf '%s' "${FAKE_RUNS:?}" | jq -c "$expression"
+    else
+      printf '%s' "${FAKE_RUNS:?}"
+    fi
+    exit 0
+    ;;
+esac
+printf 'fake gh: unsupported call: %s\n' "$*" >&2
+exit 1
+FAKE
+chmod +x "$work/bin/gh"
+
+# The "no gh" case gets a PATH holding only what verify-ci itself needs, so the
+# check does not pass just because gh sits outside the system directories on this
+# machine. bash is in the list because the caller invokes the script through it.
+for tool in bash git python3; do
+  ln -s "$(command -v "$tool")" "$work/nogh/$tool"
+done
+
+# --- payloads ----------------------------------------------------------------
+
+# A run that is not CI is newer than the successful CI run on purpose: if the
+# workflow filter ever stops being applied, case 1 fails instead of quietly
+# passing on someone else's result.
+SUCCESS_RUNS='{"workflow_runs":[
+  {"name":"CI","status":"completed","conclusion":"success","created_at":"2026-11-12T09:00:00Z"},
+  {"name":"Release","status":"completed","conclusion":"failure","created_at":"2026-11-12T11:00:00Z"}]}'
+
+FAILED_RUNS='{"workflow_runs":[
+  {"name":"CI","status":"completed","conclusion":"failure","created_at":"2026-11-12T09:00:00Z"}]}'
+
+# The case this whole script exists for: a newer failure next to an older pass.
+# Whatever order the API returns them in, created_at decides.
+STALE_RUNS='{"workflow_runs":[
+  {"name":"CI","status":"completed","conclusion":"success","created_at":"2026-11-12T09:00:00Z"},
+  {"name":"CI","status":"completed","conclusion":"failure","created_at":"2026-11-12T10:00:00Z"}]}'
+
+NO_RUNS='{"workflow_runs":[]}'
+
+RUNNING_RUNS='{"workflow_runs":[
+  {"name":"CI","status":"in_progress","conclusion":null,"created_at":"2026-11-12T09:00:00Z"}]}'
+
+# --- the cases ---------------------------------------------------------------
+
+passed=0
+failed=0
+
+# run_case <label> <expected-exit> <payload> <required-text> [<forbidden-text>] [<mode>]
+# mode: "gh" (default, fake gh on PATH), "nogh", "badref"
+run_case() {
+  label=$1
+  expected=$2
+  payload=$3
+  required=$4
+  forbidden=${5:-}
+  mode=${6:-gh}
+
+  output=
+  status=0
+  case "$mode" in
+    gh)
+      output=$(cd "$root" && PATH="$work/bin:$PATH" FAKE_RUNS="$payload" \
+        bash "$verify" HEAD 2>&1) || status=$?
+      ;;
+    nogh)
+      output=$(cd "$root" && PATH="$work/nogh" FAKE_RUNS="$payload" \
+        bash "$verify" HEAD 2>&1) || status=$?
+      ;;
+    badref)
+      output=$(cd "$root" && PATH="$work/bin:$PATH" FAKE_RUNS="$payload" \
+        bash "$verify" not-a-ref 2>&1) || status=$?
+      ;;
+  esac
+
+  problem=
+  if [ "$status" -ne "$expected" ]; then
+    problem="exit $status, expected $expected"
+  elif [ -n "$required" ] && ! printf '%s' "$output" | grep -Fq -- "$required"; then
+    problem="output does not say \"$required\""
+  elif [ -n "$forbidden" ] && printf '%s' "$output" | grep -Fq -- "$forbidden"; then
+    problem="output should not say \"$forbidden\""
+  fi
+
+  if [ -n "$problem" ]; then
+    failed=$((failed + 1))
+    printf '  %-46s FAIL  %s\n' "$label" "$problem"
+    printf '%s\n' "$output" | sed 's/^/      | /'
+  else
+    passed=$((passed + 1))
+    printf '  %-46s ok    (exit %s)\n' "$label" "$status"
+  fi
+}
+
+printf 'verify-ci-test: %s\n\n' "$(cd "$root" && git rev-parse --short HEAD)"
+
+run_case "1. newest run passed" 0 "$SUCCESS_RUNS" "is green (CI run passed)"
+run_case "2. newest run failed" 1 "$FAILED_RUNS" 'concluded "failure"' \
+  "older run for this commit passed"
+run_case "3. newest failed, older passed" 1 "$STALE_RUNS" \
+  "older run for this commit passed" "" gh
+run_case "4. no run for the commit" 1 "$NO_RUNS" "no CI run exists"
+run_case "5. newest run still going" 1 "$RUNNING_RUNS" "still running"
+run_case "6a. cannot verify: no gh" 2 "$SUCCESS_RUNS" "is not installed" "" nogh
+run_case "6b. cannot verify: unknown ref" 2 "$SUCCESS_RUNS" "does not name a commit" "" badref
+
+# Case 3 has to be distinguishable from case 2, not just a refusal: the whole
+# point of reading only the newest run is telling a stale pass from a fresh one.
+# The refusal exits non-zero, so the output is captured before it is searched --
+# piping straight into grep would fail the pipeline on the exit status alone.
+stale_output=$(cd "$root" && PATH="$work/bin:$PATH" FAKE_RUNS="$STALE_RUNS" \
+  bash "$verify" HEAD 2>&1) || true
+if printf '%s' "$stale_output" | grep -Fq "stale"; then
+  passed=$((passed + 1))
+  printf '  %-46s ok\n' "3b. refusal explains the stale pass"
+else
+  failed=$((failed + 1))
+  printf '  %-46s FAIL  %s\n' "3b. refusal explains the stale pass" \
+    "a visible green run was not explained as stale"
+fi
+
+printf '\n%d passed, %d failed\n' "$passed" "$failed"
+if [ "$failed" -gt 0 ]; then
+  printf 'verify-ci-test: %d case(s) regressed.\n' "$failed" >&2
+  exit 1
+fi
+printf 'verify-ci-test: every case behaves as intended.\n'
