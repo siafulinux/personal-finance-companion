@@ -752,10 +752,16 @@ def sync_link(
         db.flush()
 
         cursor = None if full_refresh else link.cursor
+        # One date for the whole run, and the user's rather than the server's: pages
+        # must not disagree across a midnight boundary, and a server clock ahead of
+        # the user would date rows into their future, outside every "today" query.
+        local_today = today_in(user.timezone)
         pages = 0
         transfer_buffer: list[tuple[ProviderTransactionData, FinancialAccount]] = []
         while pages < settings.sync_max_pages:
-            delta = adapter.sync_page(token, cursor, settings.sync_page_size)
+            delta = adapter.sync_page(
+                token, cursor, settings.sync_page_size, today=local_today
+            )
             _apply_delta(db, user, delta, account_map, counts, transfer_buffer)
             cursor = delta.next_cursor or cursor
             pages += 1

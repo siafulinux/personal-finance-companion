@@ -23,7 +23,7 @@ from app.services.intelligence import (
 )
 from app.services.personal import merchant_profile, spending_insights
 from app.services.shopping import shopping_check
-from app.utils.dates import add_months, month_bounds
+from app.utils.dates import add_months, month_bounds, today_in
 
 D = Decimal
 
@@ -60,7 +60,11 @@ def _txn(
         amount=D(amount),
         tx_type=tx_type,
         status=status,
-        txn_date=txn_date or date.today(),
+        # The user's local today, which is what every service compares against.
+        # `date.today()` is the server's, and a server clock ahead of the user (a
+        # UTC container in the Americas evening) dates the fixture into their
+        # future, where "up to today" queries drop it.
+        txn_date=txn_date or today_in(user.timezone),
         category_id=category_id,
     )
     db.add(txn)
