@@ -236,3 +236,71 @@ cd android && ./gradlew :app:testDebugUnitTest
 - [Safe-to-Spend calculation](safe-to-spend-calculation.md)
 - [Merchant spending intelligence](merchant-spending-intelligence.md)
 - [Location-aware Shopping Check](location-aware-shopping-check.md)
+
+## 15. Walkthrough captures
+
+Six full-page screenshots taken on 2026-11-10 while walking these screens against the
+seeded demo account. They are tracked in [`screenshots/`](../screenshots) at the repository
+root. Every figure in them is synthetic: the account is `emulator-check@pfc-verify.com`, which
+has since been deleted along with its data.
+
+They are the visual record of the release as it stood, not of the current tree. Three defects
+visible in them were fixed afterwards and are left uncorrected here on purpose, because a
+capture that has been retouched is no longer evidence of what shipped.
+
+### Web
+
+**Dashboard** — Safe-to-Spend clamped to `$0.00` with the shortfall explained, rather than a
+negative number presented as spendable:
+
+![Dashboard with the Safe-to-Spend breakdown](../screenshots/web-dashboard.png)
+
+The breakdown shows available `-$1,036.65`, bills reserved `-$1,450.00`, loan repayments
+`-$310.00` and savings goals `-$750.00`, giving a projected shortfall of `$3,546.65`, with the
+planning horizon named (through Nov 24, 2026) and a note that no payday is set.
+
+**Accounts** — cash, credit debt and net worth, then the accounts themselves:
+
+![Accounts page with balances and an audited adjustment](../screenshots/web-accounts.png)
+
+Credit debt reads `$0.00` and is labelled as never part of Safe-to-Spend; the checking account
+shows its pending, inflow and outflow totals, its opening balance, and the
+Edit / Adjust balance / Archive / Delete controls.
+
+**Insights** — merchant evidence with its history floors:
+
+![Insights page with merchant spending evidence](../screenshots/web-insights.png)
+
+Target reports 7 purchases over 4 months at medium confidence; Kroger reports 3 purchases over
+3 months and declines to claim a pattern. *This capture predates the copy fix:* the line "No
+merchant pattern is strong enough to report yet." sits directly above those two rows, which is
+contradictory — the message is now driven by whether any merchant has enough history.
+
+### Android
+
+**Loans & advances** — outstanding `$8,400.00` of `$12,000.00` borrowed, next payment
+Nov 20, 2026:
+
+![Android loans screen with balance pills and actions](../screenshots/android-loans.png)
+
+The card shows both pills — `CONFIRMED BALANCE` and `PAYOFF ~FEB 20, 2029` — and the row of
+actions. *This capture predates two fixes:* `Remove` is broken across lines as "Remov" / "e",
+and the bottom bar has no Plan tab, so this screen was reached from a dashboard card.
+
+**Savings goals** — `$750.00` set aside of a `$5,000.00` target, marked as a virtual
+allocation protected from spending:
+
+![Android savings screen with a protected allocation](../screenshots/android-savings.png)
+
+The `PROTECTED $750.00` and `$100.00 MONTHLY` pills state the protection and the contribution
+plan, and the projection ("done around Jul 10, 2030") is presented as a pace, not a promise.
+
+**Obligations** — everything already committed, in one ordered list:
+
+![Android obligations screen with overlapping obligations explained](../screenshots/android-obligations.png)
+
+The period total is `$3,210.00` with `$1,450.00` due in the next 7 days, and the "How overlaps
+are avoided" card states the three rules that keep a repayment from being counted twice:
+transfers between your own accounts are never income or spending, card repayments settle a
+liability rather than being purchases, and a loan instalment already covered by a recorded
+repayment is not listed again.
