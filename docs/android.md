@@ -137,6 +137,26 @@ Compose screen → ViewModel → FinanceRepository → ApiClient (OkHttp)
   token stops working immediately even if it was copied off the device. Expired or revoked
   tokens produce a `401` and the app returns to the sign-in screen.
 
+## Signing a release APK
+
+The release key is never in the repository. `android/app/build.gradle.kts` reads it from a
+properties file — `~/.pfc/release.properties` by default, or `PFC_KEYSTORE_PROPERTIES` —
+holding `storeFile`, `storePassword`, `keyAlias` and `keyPassword`; the same four are
+accepted from `PFC_KEYSTORE_FILE`, `PFC_KEYSTORE_PASSWORD`, `PFC_KEY_ALIAS` and
+`PFC_KEY_PASSWORD` for a CI job with masked secrets.
+
+```bash
+./gradlew :app:assembleRelease -PpfcApiBaseUrl=https://finance.example.com
+/usr/lib/android-sdk/build-tools/36.0.0/apksigner verify --print-certs \
+  app/build/outputs/apk/release/app-release.apk
+```
+
+With no key present the release build is still produced, just unsigned — a contributor
+never needs the release key to compile. Because of that, an artifact is only published
+after `apksigner verify` reports a signer. A new key changes the app's identity: an
+install signed with a different key must be uninstalled first, so keep this keystore and
+its password safe.
+
 ## Build and test
 
 ```bash
