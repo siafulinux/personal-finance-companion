@@ -8,6 +8,35 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.5] — 2026-11-12 — CI answers the merge queue
+
+The four required checks could not describe a queued entry. A merge queue builds a
+synthetic commit on a throwaway `gh-readonly-queue` ref, and only a `merge_group` run
+reports on that commit, so without the trigger the queue would wait on a status nothing
+could send. This release adds the trigger. It does not add a queue — see the notes.
+
+### Changed
+
+- **CI runs on `merge_group`** alongside `push`, `pull_request`, `workflow_dispatch` and
+  `schedule`, so a queued entry is verified where it actually lands.
+- **`Nightly suite is green` reports for `merge_group` too.** It ran only for
+  `pull_request`, which would have left the fourth required check unreported in the queue.
+  Its `nightly-fix` waiver now reads the pull request's labels through the number in the
+  queue ref, because a `merge_group` payload carries none; a failed lookup says so and
+  treats the change as unlabelled rather than waving it through.
+- **`push` ignores `gh-readonly-queue/**`**, so the queue ref cannot start a second run of
+  the same suite for the same tree.
+
+### Notes
+
+- No merge queue is enabled. GitHub offers one only for organization-owned repositories:
+  this ruleset rejects the rule with `Invalid rule 'merge_queue'`, and GraphQL reports
+  `repository.mergeQueue: null`. The trigger is inert until the repository moves to an
+  organization, and correct if it ever does. `strict_required_status_checks_policy` on the
+  ruleset already forces a pull request to include current `master` before merging.
+
+---
+
 ## [0.6.4] — 2026-11-11 — a provider that cannot connect anybody says so
 
 A provider switched on without usable credentials looked ready on the Providers screen: the
