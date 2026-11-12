@@ -213,6 +213,18 @@ is left alone so notes edited on GitHub (checksums, artifact details) survive a 
 No artifact is attached: the APK is signed with a key that stays off CI, so it is uploaded
 by hand after `apksigner verify`.
 
+```bash
+./scripts/verify-releases            # does every published release still match the changelog?
+```
+
+A release body is generated from the changelog once, and can drift afterwards: notes edited
+on GitHub that the changelog never learned about, or a changelog entry rewritten without
+updating the release. `verify-releases` compares every published body against its section,
+applying the same normalisation the workflow does, and exits `1` on a mismatch. Notes that
+are deliberately extended by hand (the checksums and artifact details on `v0.6.0`) are
+listed inside the script and reported as annotated rather than skipped; `PFC_ALLOW_DRIFT=""`
+enforces the strict comparison for every release.
+
 The same suite also runs **nightly at 03:17 UTC against `master`**, because some failures
 arrive without a push: a dependency's new release, a test that only fails on a particular
 date, or a fixture that aged out. Scheduled runs always use the default branch's copy of the
