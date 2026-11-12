@@ -198,6 +198,18 @@ date, or a fixture that aged out. Scheduled runs always use the default branch's
 workflow, and GitHub disables the schedule after 60 days without repository activity — the
 next push turns it back on.
 
+A red night blocks the next merge. The `Nightly suite is green` job runs on every pull
+request, reads the most recent completed scheduled run and fails while that run is red, so a
+broken `master` cannot be merged over. The nightly itself cannot be the required check: a
+`schedule`-only job never reports on a pull request's head commit, so requiring it directly
+would leave every PR waiting on a status that can never be sent.
+
+Because a green nightly cannot exist until the fix is merged, the job honours a
+**`nightly-fix`** label as its one waiver — the fix PR still has to pass the three test
+jobs, and the label stays visible in the PR timeline. A night that is `cancelled` or
+`skipped` proves nothing and does not block; a night that cannot be read from the API
+does, because an unverified night is not a verified one.
+
 ## Android app
 
 ```bash

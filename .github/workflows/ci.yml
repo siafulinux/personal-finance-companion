@@ -37,6 +37,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  nightly-gate:
+    # A red nightly means `master` itself is broken, and the nightly is the only
+    # run that sees drift arriving without a push. Requiring that run directly is
+    # impossible -- a `schedule`-only job never reports on a pull request's head
+    # commit, so every PR would wait forever on a status that cannot be sent.
+    # This job instead reads the last completed nightly and reds the PR while it
+    # failed. The `nightly-fix` label is the one way past it: without a waiver
+    # the fix PR would be blocked by the very failure it repairs, since a green
+    # nightly cannot exist until the fix is merged.
+    name: Nightly suite is green
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Read the last completed nightly run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+
+          # Fail closed: if the runs cannot be read, nothing proves the nightly
+          # is green, and an unverified night is not a verified one.
+          runs=$(gh api \
+            "repos/$REPO/actions/workflows/ci.yml/runs?event=schedule&branch=master&per_page=20") || {
+            echo "::error::Could not read the nightly runs, so this PR cannot be verified against them."
+            exit 1
+          }
+
+          latest=$(jq -c '[.workflow_runs[] | select(.status == "completed")] | first // empty' <<<"$runs")
+          if [ -z "$latest" ]; then
+            echo "::notice::No nightly run has finished yet, so there is nothing to gate against."
+            exit 0
+          fi
+
+          conclusion=$(jq -r '.conclusion' <<<"$latest")
+          sha=$(jq -r '.head_sha[0:7]' <<<"$latest")
+          url=$(jq -r '.html_url' <<<"$latest")
+          when=$(jq -r '.created_at' <<<"$latest")
+
+          {
+            echo "### Nightly suite: $conclusion"
+            echo ""
+            echo "Last scheduled run on \`$sha\`, $when — [$conclusion]($url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$conclusion" = "success" ]; then
+            echo "The last nightly passed."
+            exit 0
+          fi
+
+          # A cancelled or skipped night proves nothing either way; it is not a
+          # red night, so it does not block. Only a genuine failure does.
+          if [ "$conclusion" = "cancelled" ] || [ "$conclusion" = "skipped" ]; then
+            echo "::notice::The last nightly was $conclusion, which proves nothing about master; not blocking on it."
+            exit 0
+          fi
+
+          case ",${LABELS:-}," in
+            *,nightly-fix,*)
+              echo "::warning::The last nightly failed ($url) but this PR carries the nightly-fix label, so it may proceed. The three test jobs are still required."
+              exit 0
+              ;;
+          esac
+
+          echo "::error::The nightly run on $sha failed ($url). Fix master, or label this PR nightly-fix if it is the fix, before merging."
+          exit 1
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
