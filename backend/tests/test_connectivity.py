@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -78,6 +80,32 @@ def test_sandbox_subscriptions_stay_detectable_on_any_date(today):
         assert len(dates) >= 3, f"{merchant} has only {len(dates)} occurrences on {today}"
         assert max(dates) <= today
         assert (today - min(dates)).days <= 95, f"{merchant} reaches back to {min(dates)}"
+
+
+def test_sandbox_dates_from_its_institution_zone_not_the_host_clock():
+    """The simulated institution has a timezone, so the host's must not matter.
+
+    Reading `date.today()` made the fixtures depend on where the container ran: a
+    UTC image and a laptop in the Americas disagreed about the day, and rows could
+    land a day into the user's future. This flips `TZ` across the date line, where
+    a host-clock read would have to change its answer, and pins that the sandbox
+    does not.
+    """
+    from app.providers.sandbox import INSTITUTION_TIMEZONE, institution_today
+
+    expected = today_in(INSTITUTION_TIMEZONE)
+    original = os.environ.get("TZ")
+    try:
+        for zone in ("Pacific/Kiritimati", "Pacific/Midway"):
+            os.environ["TZ"] = zone
+            time.tzset()
+            assert institution_today() == expected
+    finally:
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
 
 
 def test_connect_imports_accounts_and_encrypts_token(db, user):

@@ -29,12 +29,25 @@ from app.providers.base import (
     ProviderTransactionData,
     TransactionDelta,
 )
-from app.utils.dates import add_months
+from app.utils.dates import add_months, today_in
 from app.utils.money import quantize
 
 CHECKING = "sbx-checking"
 SAVINGS = "sbx-savings"
 CREDIT = "sbx-credit"
+
+# The simulated institution sits in one US timezone. Its "today" is therefore a
+# property of the institution, not of whatever host happens to run the container.
+# Reading the container clock made the same sandbox input produce different
+# fixtures on a UTC image and on a laptop in the Americas, which is precisely the
+# difference a deterministic fixture must not have -- and it showed up as rows
+# dated a day into the user's future.
+INSTITUTION_TIMEZONE = "America/New_York"
+
+
+def institution_today() -> date:
+    """Today at the simulated institution, independent of the container clock."""
+    return today_in(INSTITUTION_TIMEZONE)
 
 # How many activity "days" each item has been advanced. Module state on purpose: the
 # sandbox only exists for development and tests, and never holds real money.
@@ -363,7 +376,7 @@ class SandboxProvider(ProviderAdapter):
             external_item_id=f"sbx-item-{seed}",
             institution_name="Sandbox Credit Union",
             institution_id="ins_sandbox_credit_union",
-            history_start=date.today() - timedelta(days=_HISTORY_DAYS),
+            history_start=institution_today() - timedelta(days=_HISTORY_DAYS),
         )
 
     def list_accounts(self, access_token: str) -> list[ProviderAccountData]:
@@ -429,8 +442,10 @@ class SandboxProvider(ProviderAdapter):
     ) -> TransactionDelta:
         item_id = access_token.replace("sbx-access-", "sbx-item-")
         # The caller's date, so the simulated history never reaches past the day the
-        # user is in. Falling back to the server clock keeps direct calls testable.
-        today = today or date.today()
+        # user is in. Falling back to the institution's own day keeps direct calls --
+        # and a connection made before any sync -- on that same calendar instead of
+        # on the host's.
+        today = today or institution_today()
         current = generation_of(item_id)
 
         # A missing cursor means "from the beginning", which is how a forced full
