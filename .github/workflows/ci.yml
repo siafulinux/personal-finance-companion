@@ -253,9 +253,16 @@ jobs:
     # One issue, reopened by comment: a new issue every red night would bury the
     # repository in duplicates of the same breakage, so an open `ci-nightly`
     # issue is updated rather than duplicated.
+    #
+    # The same job closes it once a night passes again. An issue that stays open
+    # after the breakage is fixed is worse than no issue: it teaches whoever reads
+    # the list to ignore it, and it leaves the repository claiming a failure that
+    # has stopped happening. The close runs only when all three suites passed -- a
+    # cancelled or skipped night proves nothing and leaves the issue alone, which
+    # is the same rule the `Nightly suite is green` gate applies.
     name: Nightly failure alert
     needs: [backend, web, android]
-    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -263,6 +270,7 @@ jobs:
       issues: write
     steps:
       - name: Open or update the nightly failure issue
+        if: contains(needs.*.result, 'failure')
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -321,3 +329,45 @@ jobs:
               --label ci-nightly \
               --body "$body"
           fi
+
+      - name: Close the issue once the night is green
+        # Only a fully passing night closes it: `cancelled` and `skipped` prove
+        # nothing either way, so they leave the issue as it was.
+        if: ${{ needs.backend.result == 'success' && needs.web.result == 'success' && needs.android.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Every open one, not just the first: the alert only ever creates one, but
+          # a hand-filed duplicate should not outlive the failure it describes.
+          open=$(gh issue list --repo "$REPO" --label ci-nightly --state open \
+            --limit 10 --json number --jq '.[].number')
+
+          if [ -z "$open" ]; then
+            echo "No open ci-nightly issue; the night is green and there is nothing to close."
+            exit 0
+          fi
+
+          body=$(cat <<EOF
+          The scheduled CI run on \`master\` passed again at commit \`${SHA:0:7}\`, so the
+          failure this issue describes has stopped happening.
+
+          - [Run log]($RUN_URL)
+          - Backend tests: **success**
+          - Web typecheck and tests: **success**
+          - Android unit tests: **success**
+
+          Closing automatically. If it recurs, the next red night opens or updates an
+          issue again, so nothing is lost by letting this one go.
+          EOF
+          )
+
+          for number in $open; do
+            gh issue comment "$number" --repo "$REPO" --body "$body"
+            gh issue close "$number" --repo "$REPO" --reason completed
+            echo "::notice::Closed nightly failure issue #$number: the night is green again."
+          done

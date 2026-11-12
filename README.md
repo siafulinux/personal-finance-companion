@@ -236,6 +236,11 @@ schedule, and updates one open `ci-nightly` issue rather than opening a new one 
 a duplicate per red run would bury the same breakage. The issue carries the run link, each
 job's result and the local commands to reproduce it.
 
+The first green night closes it again, with a comment naming the commit and the passing run.
+An issue that outlives its failure is worse than none — it trains whoever reads the list to
+ignore it. `cancelled` and `skipped` nights change nothing, since they prove neither
+outcome; that is the same rule the merge gate applies.
+
 A red night blocks the next merge. The `Nightly suite is green` job runs on every pull
 request, reads the most recent completed scheduled run and fails while that run is red, so a
 broken `master` cannot be merged over. The nightly itself cannot be the required check: a
