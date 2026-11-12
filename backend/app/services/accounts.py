@@ -224,20 +224,3 @@ def totals(db: Session, user_id: uuid.UUID) -> dict[str, Decimal]:
         "total_debt": quantize(debt),
         "net_worth": quantize(cash - debt),
     }
-
-
-def seed_default_cash_account(db: Session, user_id: uuid.UUID, balance: Decimal) -> FinancialAccount:
-    from datetime import date
-
-    account = FinancialAccount(
-        user_id=user_id,
-        name="Everyday Checking",
-        account_type=AccountType.CHECKING.value,
-        opening_balance=quantize(balance),
-        opening_balance_date=date.today(),
-        include_in_safe_to_spend=True,
-        description="Created during onboarding",
-    )
-    db.add(account)
-    db.flush()
-    return account
