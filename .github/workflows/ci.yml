@@ -189,6 +189,14 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - name: Check every documentation image exists
+        # Deliberately in this job rather than one of its own: only the three
+        # required checks plus the nightly gate can block a merge, so a separate
+        # job would go red and still let the pull request through. It also runs
+        # before `npm ci`, so a renamed screenshot fails in seconds instead of
+        # after a dependency install.
+        working-directory: .
+        run: ./scripts/verify-doc-images
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

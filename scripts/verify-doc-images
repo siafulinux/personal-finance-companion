@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Fail when a Markdown image reference points at a file that is not in the repository.
+#
+#   scripts/verify-doc-images              # every tracked Markdown file
+#   scripts/verify-doc-images docs/        # only files under docs/
+#
+# A screenshot that was renamed, moved or never committed renders as a broken image
+# on GitHub and in the file viewer, and nothing else in CI reads the docs, so an
+# acceptance document can rot for months before a reader finds it.
+#
+# Only local references are checked. A remote URL is somebody else's file and would
+# make the build depend on the network; `data:` URIs and `#anchors` are not files
+# either. A reference whose scheme this script does not understand is reported rather
+# than skipped, so a document cannot hide a broken image behind syntax it ignores --
+# the same reason reference-style images (`![alt][id]`) are an error here instead of
+# a silent pass.
+#
+# Exit codes: 0 every image exists, 1 at least one is missing or unsupported,
+#             2 cannot check (no git, no python3).
+set -euo pipefail
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+case ${1:-} in
+  -h | --help) usage ;;
+esac
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$root"
+
+command -v git >/dev/null 2>&1 || {
+  printf 'verify-doc-images: git is required to list the tracked documents.\n' >&2
+  exit 2
+}
+command -v python3 >/dev/null 2>&1 || {
+  printf 'verify-doc-images: python3 is required to parse the references.\n' >&2
+  exit 2
+}
+
+python3 - "$@" <<'PY'
+import os
+import re
+import subprocess
+import sys
+import urllib.parse
+
+root = os.getcwd()
+targets = [t.rstrip("/") for t in sys.argv[1:]]
+
+listed = subprocess.run(
+    ["git", "ls-files", "-z", "*.md", "*.markdown"], capture_output=True
+)
+if listed.returncode != 0:
+    print("verify-doc-images: cannot list the tracked documents.", file=sys.stderr)
+    sys.exit(2)
+
+paths = [p for p in listed.stdout.decode("utf-8", "replace").split("\0") if p]
+if targets:
+    paths = [p for p in paths if any(p == t or p.startswith(t + "/") for t in targets)]
+    if not paths:
+        print(f"verify-doc-images: no tracked document under {', '.join(targets)}.", file=sys.stderr)
+        sys.exit(2)
+
+INLINE = re.compile(r"!\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)")
+HTML = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.IGNORECASE)
+REFERENCE = re.compile(r"!\[[^\]]*\]\[[^\]]*\]")
+
+REMOTE = ("http://", "https://", "//", "data:", "mailto:")
+
+
+def line_of(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+checked = 0
+problems: list[str] = []
+
+for doc in paths:
+    with open(doc, encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    found: list[tuple[int, str]] = []
+
+    for match in INLINE.finditer(text):
+        ref = match.group(1)
+        if ref.startswith("<") and ref.endswith(">"):
+            ref = ref[1:-1]
+        found.append((line_of(text, match.start()), ref))
+    for match in HTML.finditer(text):
+        ref = match.group(1) if match.group(1) is not None else match.group(2)
+        found.append((line_of(text, match.start()), ref))
+
+    for line, ref in found:
+        checked += 1
+        target = ref.strip()
+        if not target or target.startswith("#"):
+            continue
+        if target.lower().startswith(REMOTE):
+            continue
+
+        # A fragment or query string never changes which file is meant.
+        local = urllib.parse.unquote(target.split("#", 1)[0].split("?", 1)[0])
+        if local.startswith("/"):
+            resolved = os.path.normpath(os.path.join(root, local.lstrip("/")))
+        else:
+            resolved = os.path.normpath(os.path.join(os.path.dirname(doc), local))
+
+        if not os.path.isfile(resolved):
+            problems.append(f"{doc}:{line}  missing image: {target}")
+
+    for match in REFERENCE.finditer(text):
+        problems.append(
+            f"{doc}:{line_of(text, match.start())}  reference-style image links are not "
+            "supported; use an inline path so this check can see it"
+        )
+
+if problems:
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    print(
+        f"verify-doc-images: {len(problems)} problem(s) across {len(paths)} document(s).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+print(f"verify-doc-images: {checked} image reference(s) across {len(paths)} document(s) all exist.")
+PY
