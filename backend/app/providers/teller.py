@@ -336,13 +336,21 @@ class TellerProvider(ProviderAdapter):
         }
 
     def complete_link(
-        self, public_token: str, payload: dict | None = None
+        self,
+        public_token: str,
+        payload: dict | None = None,
+        *,
+        today: date | None = None,
     ) -> LinkResult:
         """Verify and accept a Teller Connect enrolment.
 
         ``public_token`` is the access token. ``payload`` must carry the enrolment's
         identity (``user_id``, ``enrollment_id``) and, when signing is configured, the
         ``signatures`` Teller produced for our nonce.
+
+        ``today`` is the user's local date: the history window is counted back from the
+        day they are living in, not from this host's clock, which may already be on
+        tomorrow and would date the opening balance into their future.
         """
         if not public_token:
             raise ProviderError(
@@ -399,7 +407,7 @@ class TellerProvider(ProviderAdapter):
             external_item_id=enrollment_id or str(payload.get("external_item_id") or ""),
             institution_name=str(institution_name or "Connected institution")[:160],
             institution_id=str(institution_id) if institution_id else None,
-            history_start=date.today() - timedelta(days=INITIAL_HISTORY_DAYS),
+            history_start=(today or date.today()) - timedelta(days=INITIAL_HISTORY_DAYS),
         )
 
     def _verify_signature(

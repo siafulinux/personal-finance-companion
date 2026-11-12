@@ -279,9 +279,18 @@ class PlaidProvider(ProviderAdapter):
         return str(public_token)
 
     def complete_link(
-        self, public_token: str, payload: dict | None = None
+        self,
+        public_token: str,
+        payload: dict | None = None,
+        *,
+        today: date | None = None,
     ) -> LinkResult:
-        """Exchange a Link public token. Plaid needs nothing beyond it."""
+        """Exchange a Link public token. Plaid needs nothing beyond it.
+
+        ``today`` is accepted and ignored: Plaid decides how much history it returns
+        and reports no window, so ``history_start`` stays None rather than inventing a
+        date the provider never gave us.
+        """
         data = self._post("/item/public_token/exchange", {"public_token": public_token})
         access_token = data.get("access_token")
         item_id = data.get("item_id")

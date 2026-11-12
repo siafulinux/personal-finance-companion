@@ -855,7 +855,11 @@ def connect_institution(
     enriched = dict(payload or {})
     # Always verify a linking nonce against the signed-in user, whatever the caller sent.
     enriched["expected_user_id"] = str(user.id)
-    result = adapter.complete_link(public_token, enriched)
+    # The history window is counted back from the user's day, the same clock the sync
+    # below paginates on. Reading the host's date here dated the window -- and every
+    # account's opening balance -- into the user's future on a UTC container in the
+    # Americas evening, which the first sync then dropped from its "up to today" reads.
+    result = adapter.complete_link(public_token, enriched, today=today_in(user.timezone))
     was_connected = False
 
     link = db.scalar(

@@ -14,7 +14,7 @@ from app.models import FinancialAccount, ProviderLink, SyncRun, Transaction, Use
 from app.models.enums import TransactionSource, TransactionStatus
 from app.providers.base import ProviderError
 from app.providers.registry import get_adapter
-from app.providers.sandbox import advance, reset_state
+from app.providers.sandbox import _HISTORY_DAYS, advance, reset_state
 from app.security.secrets import decrypt_text
 from app.services import sync as sync_module
 from app.services.balances import account_balance
@@ -120,6 +120,54 @@ def test_sandbox_dates_from_its_institution_zone_not_the_host_clock():
         else:
             os.environ["TZ"] = original
         time.tzset()
+
+
+def test_complete_link_counts_the_history_window_from_the_users_day():
+    """`history_start` dates every opening balance, so it follows the user's calendar.
+
+    The window was counted from this host's clock: on a UTC container in an Americas
+    evening it started a day into the user's future, and the opening balance it dates
+    landed there too, where the first sync's "up to today" reads drop it.
+    """
+    from app.providers.sandbox import SandboxProvider
+
+    adapter = SandboxProvider()
+    link_token = adapter.create_link_token("user-1")["link_token"]
+    user_day = date(2026, 3, 4)
+
+    result = adapter.complete_link(link_token, None, today=user_day)
+
+    assert result.history_start == user_day - timedelta(days=_HISTORY_DAYS)
+
+
+def test_connect_institution_opens_the_window_on_the_users_calendar(db):
+    """Two users whose timezones are 25 hours apart always disagree about the day.
+
+    Kiritimati is UTC+14 and Midway UTC-11, so their dates differ at every hour. A
+    window taken from the server's clock would hand both users the same
+    `history_start`; one taken from the user's day cannot.
+    """
+    owners = {}
+    for zone in ("Pacific/Kiritimati", "Pacific/Midway"):
+        owners[zone] = register_user(
+            db,
+            email=f"tz-{zone.split('/')[1].lower()}-{uuid.uuid4().hex[:6]}@example.com",
+            password="TestPassword123",
+            display_name="TZ User",
+            timezone=zone,
+        )
+    db.commit()
+
+    starts = {}
+    for zone, owner in owners.items():
+        link, _accounts, _run = _connect(db, owner)
+        starts[zone] = link.history_start
+        assert link.history_start == today_in(zone) - timedelta(days=_HISTORY_DAYS)
+
+    # The spread is 25 hours, so the two dates are one or two days apart depending on
+    # the hour; what must hold is that they are never the same day.
+    assert starts["Pacific/Kiritimati"] != starts["Pacific/Midway"]
+    assert starts["Pacific/Kiritimati"] > starts["Pacific/Midway"]
 
 
 def test_connect_imports_accounts_and_encrypts_token(db, user):
