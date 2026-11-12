@@ -180,6 +180,124 @@ jobs:
         working-directory: backend
         run: .venv/bin/python -m pytest
 
+  # The nightly can only catch a calendar bug on the night it happens to be the
+  # problematic date, and a stale-looking failure on the 30th of a month is hard
+  # to tell apart from a real regression. This job moves the clock instead, so a
+  # fixture that assumes a 30-day November, or that a month-end date exists, or
+  # that UTC midnight is already "tomorrow" for the user, fails on a normal day.
+  #
+  # The clock is only shifted for these runs; the scheduled and pushed suites
+  # still use the real one. `libfaketime` is used rather than overriding a
+  # `PFC_TODAY` variable on purpose: only a real clock exercises the code that
+  # calls the clock, which is where the date arithmetic bugs actually live.
+  backend-calendar:
+    name: Backend on a shifted clock (${{ matrix.why }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # One bad date should not hide the others; each is its own signal.
+      fail-fast: false
+      matrix:
+        include:
+          # Leap day, so anything that builds a date from month/day arithmetic
+          # and assumes a 28-day February breaks here rather than in production.
+          - why: leap day 2028-02-29
+            today: "2028-02-29 12:00:00"
+          # 02:00 UTC on the 1st is still the evening of the 30th in the
+          # Americas, so a fixture reading UTC "today" while the user's local
+          # date is the previous month produces rows a month into their future.
+          - why: month end at UTC midnight
+            today: "2028-12-01 02:00:00"
+          # The same skew across February, where the two sides differ by a day
+          # and a month rather than just a month.
+          - why: month end after the leap day
+            today: "2027-03-01 03:00:00"
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: finance
+          POSTGRES_PASSWORD: finance_dev_password
+          POSTGRES_DB: finance
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U finance -d finance"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "55432"
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: finance_dev_password
+      TODAY: ${{ matrix.today }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install libfaketime
+        # libfaketime intercepts the C library's clock calls, so the shift
+        # covers subprocesses too -- the migrations the fixtures run through
+        # `alembic` get the same date as the tests themselves.
+        #
+        # The shared object is preloaded by path rather than through the
+        # `faketime` wrapper. That wrapper expands a compiled-in path and, when
+        # it cannot find the library, prints a line to stderr and runs the
+        # command anyway with the real clock -- so a broken install would leave
+        # this job green while testing today's date. The path is resolved here
+        # and the step below verifies the shift actually happened.
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends faketime ||
+            sudo apt-get install -y --no-install-recommends libfaketime1
+          lib=$(ls /usr/lib/*/faketime/libfaketime.so.1 2>/dev/null | head -1)
+          if [ -z "$lib" ]; then
+            echo "::error::libfaketime.so.1 is not installed, so the clock cannot be shifted."
+            exit 1
+          fi
+          echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
+          echo "Resolved $lib"
+      - name: Install into backend/.venv
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install -e '.[dev]'
+      - name: Prove the clock shifted
+        # Fail closed. If the preload did not take effect, every test below runs
+        # on today's date and the job would report a false pass -- the one
+        # outcome this job must never produce.
+        #
+        # Both zones are printed because the difference between them is the bug
+        # being sought, and a failed run has to say which clock it was using.
+        run: |
+          set -euo pipefail
+          want=${TODAY%% *}
+          shifted=$(LD_PRELOAD="$FAKETIME_LIB" FAKETIME="@$TODAY" \
+            FAKETIME_DONT_FAKE_MONOTONIC=1 date -u '+%Y-%m-%d')
+          echo "real UTC date:    $(date -u '+%Y-%m-%d')"
+          echo "shifted UTC date: $shifted  (wanted $want)"
+          LD_PRELOAD="$FAKETIME_LIB" FAKETIME="@$TODAY" FAKETIME_DONT_FAKE_MONOTONIC=1 \
+            env TZ=America/New_York date '+user-local:      %Y-%m-%d %H:%M %Z'
+          if [ "$shifted" != "$want" ]; then
+            echo "::error::The clock is $shifted, not $want, so this job would have tested today's date and proved nothing."
+            exit 1
+          fi
+      - name: Run tests with the clock shifted
+        working-directory: backend
+        # FAKETIME_DONT_FAKE_MONOTONIC keeps the monotonic clock real: shifting
+        # it stalls timeouts, connection retries and the event loop's own timers,
+        # which produces hangs rather than date failures. Only the wall clock is
+        # the subject here.
+        run: |
+          LD_PRELOAD="$FAKETIME_LIB" FAKETIME="@$TODAY" FAKETIME_DONT_FAKE_MONOTONIC=1 \
+            .venv/bin/python -m pytest
+
   web:
     name: Web typecheck and tests
     runs-on: ubuntu-latest

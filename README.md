@@ -253,6 +253,30 @@ jobs, and the label stays visible in the PR timeline. A night that is `cancelled
 `skipped` proves nothing and does not block; a night that cannot be read from the API
 does, because an unverified night is not a verified one.
 
+The nightly can only catch a calendar bug on the night it is that date, so a separate job
+moves the clock instead. **`Backend on a shifted clock`** runs the backend suite three
+times under `libfaketime` — on the leap day (2028-02-29), at 02:00 UTC on the 1st of a month
+(still the 30th in the Americas), and across February into March. A fixture that assumes a
+30-day November, builds a date by month/day arithmetic, or reads the container's UTC date
+while the user's local date is the previous month fails on an ordinary Tuesday rather than
+on the day it matters.
+
+Only the wall clock is shifted: `FAKETIME_DONT_FAKE_MONOTONIC=1` keeps the monotonic clock
+real, because faking it stalls timeouts and connection retries into hangs instead of date
+failures. The preload covers subprocesses too, so the migrations the fixtures run through
+`alembic` share the shifted date. The step before the suite asserts the clock really did
+move and fails closed if it did not — the `faketime` wrapper ignores a preload it cannot
+find and runs with the real clock, and a calendar job that quietly tests today's date is
+worse than no job at all.
+
+```bash
+cd backend
+sudo apt-get install -y faketime
+TODAY="2028-02-29 12:00:00"
+LD_PRELOAD=$(ls /usr/lib/*/faketime/libfaketime.so.1) FAKETIME="@$TODAY" \
+  FAKETIME_DONT_FAKE_MONOTONIC=1 .venv/bin/python -m pytest
+```
+
 ## Android app
 
 ```bash
