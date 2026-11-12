@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -430,12 +431,20 @@ private fun TrackedPlaceRow(
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        // FlowRow, not Row: two labelled switches plus Remove exceed a narrow card,
+        // and a Row squeezes the trailing button's label mid-word. Flowing keeps each
+        // control whole and wraps to a second line when it has to.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(if (location.isActive) "Watching" else "Paused", style = MaterialTheme.typography.labelSmall)
             Switch(checked = location.isActive, onCheckedChange = onToggle, enabled = !busy)
             Text("Notify", style = MaterialTheme.typography.labelSmall)
             Switch(checked = location.notifyEnabled, onCheckedChange = onToggleNotifications, enabled = !busy)
-            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove") }
+            TextButton(onClick = onDelete, enabled = !busy) { Text("Remove", maxLines = 1) }
         }
     }
 }
