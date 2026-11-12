@@ -8,55 +8,64 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
-## [0.6.2] — 2026-11-11 — release plumbing and the walkthrough defects
+## [0.6.6] — 2026-11-12 — a suite that checks the calendar and the documents
 
-Two threads: making a release something the repository verifies rather than something a human
-remembers to check, and clearing what the Phase 4 walkthroughs turned up. No version number in
-the API changes — this is plumbing and repairs. The Android manifest was still `0.6.0`, which
-is fixed here.
+The last few releases taught the repository to verify its own releases. This one closes the
+gaps those checks still left: dates that only fail on the day they are that date, documents
+that point at images nobody committed, and a CLI deletion path that kept its own copy of a
+bug already fixed in the service layer.
 
 ### Added
 
-- **Teller live-verification harness** (`backend/scripts/verify_teller_live.py`): links an
-  institution, syncs it and disconnects against the real API step by step, and refuses to
-  report success for any step it could not run. Its fail-closed paths — missing configuration,
-  a non-sandbox environment, an unreachable provider — have unit tests of their own.
-- **Nightly CI** at 03:17 UTC against the default branch. Some breakage needs no push: a
-  dependency publishing a breaking release, a test that only fails on one calendar date, a
-  fixture that aged out. The schedule surfaces those overnight instead of during a release.
-- **Android build-time address check** in CI: the app is assembled with `-PpfcApiBaseUrl` and
-  the APK's dex is searched for the value, so a broken override fails the step rather than
-  shipping an APK that still points at the emulator.
-- **Plan tab** in Android, indexing Loans, Savings and Obligations. They were reachable only
-  from a card low on the dashboard, which meant scrolling past the summary to find them and no
-  route back once that card changed.
+- **Backend suite on a shifted clock.** A `backend-calendar` matrix job runs the backend tests
+  under `libfaketime` at three awkward dates — the 2028 leap day, 02:00 UTC on the 1st of a
+  month (still the 30th in the Americas), and the February-to-March boundary. A fixture that
+  assumes a 30-day November now fails on an ordinary day instead of on the day it matters. The
+  preload is resolved by path and a step asserts the clock actually moved, because the
+  `faketime` wrapper silently falls back to the real clock when it cannot find the library.
+- **Documented images are checked.** `scripts/verify-doc-images` fails CI when a document
+  references an image that is not in the repository, so a broken screenshot link cannot ship.
+- **`scripts/verify-releases`** compares every published release body against its changelog
+  section, so notes edited on GitHub and entries rewritten here cannot drift apart unseen.
+- **The nightly failure issue closes itself.** The first green scheduled run afterwards
+  comments on and closes the `ci-nightly` issue it opened, instead of leaving a stale alarm.
+- **Phase 4 walkthrough captures.** Six screens — web loans, savings, obligations and shopping
+  check; Android plan and shopping intelligence — are committed under `screenshots/` and
+  referenced from the acceptance report.
+- **CLI demo-reset tests**, so `pfc seed-demo --remove` is guarded by the same warning filter
+  as the account deletion path, and a Phase 4 cascade test proving a deleted user takes their
+  loans, savings goals, visits and tracked locations with them.
 
 ### Fixed
 
-- **Deleting an account that has budgets** no longer deletes the budgets and their allocations
-  twice. The backend suite now treats `SAWarning` as an error, so an "expected to delete N
-  row(s); 0 were matched" cannot pass unnoticed a second time.
-- **Insight empty states** no longer say a merchant's pattern is too weak while listing
-  high-confidence findings above them; the message follows the history that actually exists.
-- **Loan action row** flows to a second line instead of breaking a label mid-word
-  ("Remov" / "e") when the three buttons do not fit on a narrow screen.
-- **Android server address** can be baked in at build time with `-PpfcApiBaseUrl`, instead of
-  the emulator loopback being the only default, and it is validated before it reaches the app.
+- **`pfc seed-demo --remove` deleted budget allocations twice.** It loaded each budget and let
+  the ORM delete its allocations, which the category and user deletes had already removed by
+  cascade, so SQLAlchemy reported "expected to delete N row(s); 0 were matched". Allocations
+  are now deleted first, by bulk delete, as `delete_user_account` already did.
+- **The link-history window is counted from the user's local day** rather than the server's
+  clock, so an evening in the Americas no longer reads yesterday's window.
+- **The sandbox institution has its own timezone** instead of the container's, so the same
+  simulated input cannot produce fixtures dated a day into the user's future; test fixtures
+  are dated from the user's clock for the same reason.
 
 ### Changed
 
-- PostgreSQL is published on `127.0.0.1:${PFC_DB_PORT:-5433}` for host-side diagnostics. It
-  stays loopback-only, and `docs/remote-access.md` no longer claims no host port exists.
-- **The Android manifest reports `0.6.2` / versionCode 9.** It had said `0.6.0` since the Phase 4
-  build, so an installed APK could not be told apart from the first `0.6.0` one while the server
-  had already moved on. There is no new app behaviour — the version is the change — and it is what
-  the signed APK attached to this release was built from.
+- **The tag gate allows a manifest newer than its tag.** A release re-cut from a branch that
+  has moved on builds today's tree under an older tag, so only a manifest *older* than the tag
+  is refused — that is the case that ships an install predating the notes it is released with.
+- **The Android manifest reports `0.6.6` / versionCode 10.** It had been left at `0.6.2` / 9
+  while `0.6.3`–`0.6.5` shipped, so the gate could not verify any of those tags.
+- **Changelog sections are ordered newest first again**, after `0.6.2` was moved to the head
+  when it was re-cut.
+- Removed the unused `seed_default_cash_account` helper rather than leaving a second place
+  that decides which account is the default.
 
 ### Notes
 
-- This section heads the changelog because the tag was re-cut on 2026-11-12. `v0.6.2` pointed
-  at a tree whose manifest said `0.6.4`, so the tag, the manifest and these notes disagreed;
-  `0.6.3`–`0.6.5` were released from `master` in between and keep their sections below.
+- This is the first release cut after the drift: `v0.6.5` is the newest tag, so `0.6.6` is the
+  next version, and the manifest, the sections above and this heading now agree with it.
+- No APK has been built for this release yet, so the downloads folder and the `v0.6.2` release
+  asset remain the newest installable build.
 
 ---
 
@@ -156,6 +165,58 @@ release tag, which is what this entry is.
 - Producing this release moved the deployed images to `pfc-api:0.6.1` / `pfc-web:0.6.1`; the
   images now carry `org.opencontainers.image.ref.name` and `.revision` labels, which earlier
   builds claimed in `.env` but did not have.
+
+---
+
+## [0.6.2] — 2026-11-11 — release plumbing and the walkthrough defects
+
+Two threads: making a release something the repository verifies rather than something a human
+remembers to check, and clearing what the Phase 4 walkthroughs turned up. No version number in
+the API changes — this is plumbing and repairs. The Android manifest was still `0.6.0`, which
+is fixed here.
+
+### Added
+
+- **Teller live-verification harness** (`backend/scripts/verify_teller_live.py`): links an
+  institution, syncs it and disconnects against the real API step by step, and refuses to
+  report success for any step it could not run. Its fail-closed paths — missing configuration,
+  a non-sandbox environment, an unreachable provider — have unit tests of their own.
+- **Nightly CI** at 03:17 UTC against the default branch. Some breakage needs no push: a
+  dependency publishing a breaking release, a test that only fails on one calendar date, a
+  fixture that aged out. The schedule surfaces those overnight instead of during a release.
+- **Android build-time address check** in CI: the app is assembled with `-PpfcApiBaseUrl` and
+  the APK's dex is searched for the value, so a broken override fails the step rather than
+  shipping an APK that still points at the emulator.
+- **Plan tab** in Android, indexing Loans, Savings and Obligations. They were reachable only
+  from a card low on the dashboard, which meant scrolling past the summary to find them and no
+  route back once that card changed.
+
+### Fixed
+
+- **Deleting an account that has budgets** no longer deletes the budgets and their allocations
+  twice. The backend suite now treats `SAWarning` as an error, so an "expected to delete N
+  row(s); 0 were matched" cannot pass unnoticed a second time.
+- **Insight empty states** no longer say a merchant's pattern is too weak while listing
+  high-confidence findings above them; the message follows the history that actually exists.
+- **Loan action row** flows to a second line instead of breaking a label mid-word
+  ("Remov" / "e") when the three buttons do not fit on a narrow screen.
+- **Android server address** can be baked in at build time with `-PpfcApiBaseUrl`, instead of
+  the emulator loopback being the only default, and it is validated before it reaches the app.
+
+### Changed
+
+- PostgreSQL is published on `127.0.0.1:${PFC_DB_PORT:-5433}` for host-side diagnostics. It
+  stays loopback-only, and `docs/remote-access.md` no longer claims no host port exists.
+- **The Android manifest reports `0.6.2` / versionCode 9.** It had said `0.6.0` since the Phase 4
+  build, so an installed APK could not be told apart from the first `0.6.0` one while the server
+  had already moved on. There is no new app behaviour — the version is the change — and it is what
+  the signed APK attached to this release was built from.
+
+### Notes
+
+- The tag was re-cut on 2026-11-12. `v0.6.2` pointed at a tree whose manifest said `0.6.4`, so
+  the tag, the manifest and these notes disagreed; `0.6.3`–`0.6.5` were released from `master` in
+  between and keep their own sections.
 
 ---
 

@@ -12,17 +12,99 @@ from __future__ import annotations
 
 import uuid
 import warnings
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models import Budget, BudgetAllocation, Category, Transaction, User
+from app.database.base import SessionLocal
+from app.models import (
+    Budget,
+    BudgetAllocation,
+    Category,
+    InsightDismissal,
+    Loan,
+    LoanPayment,
+    SavingsContribution,
+    SavingsGoal,
+    ShoppingVisit,
+    TrackedLocation,
+    Transaction,
+    User,
+)
 from app.schemas.planning import BudgetAllocationInput, BudgetCreate
 from app.services.budgets import create_budget
 from app.services.users import delete_user_account, register_user
 
 PASSWORD = "TestPassword123"
+
+
+# Every Phase 4 table a user owns. The models declare ``ON DELETE CASCADE`` from
+# ``users.id`` and ``User`` has no relationship to any of them, so ``DELETE FROM
+# users`` is the only thing that removes these rows: if the schema and the models
+# ever disagree, they survive and this tuple catches it.
+PHASE_4_OWNED = (
+    Loan,
+    LoanPayment,
+    SavingsGoal,
+    SavingsContribution,
+    TrackedLocation,
+    ShoppingVisit,
+    InsightDismissal,
+)
+
+
+def _phase_4_rows(db, user) -> None:
+    """One row in every Phase 4 table, including children of children."""
+    loan = Loan(
+        user_id=user.id,
+        name=f"Car loan {user.id.hex[:6]}",
+        lender="Example Lender",
+        original_amount=Decimal("12000.00"),
+        opening_balance=Decimal("8400.00"),
+        balance_as_of=date.today(),
+    )
+    goal = SavingsGoal(
+        user_id=user.id,
+        name=f"Emergency fund {user.id.hex[:6]}",
+        target_amount=Decimal("5000.00"),
+        saved_amount=Decimal("1250.00"),
+    )
+    place = TrackedLocation(
+        user_id=user.id,
+        name=f"Target {user.id.hex[:6]}",
+        merchant="Target",
+        merchant_key="target",
+    )
+    db.add_all([loan, goal, place])
+    # Ids come from the parent rows above, so the children need them flushed first.
+    db.flush()
+    db.add_all(
+        [
+            LoanPayment(
+                user_id=user.id,
+                loan_id=loan.id,
+                amount=Decimal("310.00"),
+                paid_on=date.today(),
+            ),
+            SavingsContribution(
+                user_id=user.id,
+                goal_id=goal.id,
+                amount=Decimal("100.00"),
+                contributed_on=date.today(),
+            ),
+            ShoppingVisit(
+                user_id=user.id,
+                tracked_location_id=place.id,
+                business_name="Target",
+                merchant_key="target",
+                visited_at=datetime.now(UTC),
+                visit_day=date.today(),
+            ),
+            InsightDismissal(user_id=user.id, key=f"merchant:target:{user.id.hex[:6]}"),
+        ]
+    )
+    db.commit()
 
 
 def _budget_for(db, user) -> Budget:
@@ -149,3 +231,45 @@ def test_deleting_an_account_still_removes_financial_history(db, user):
         == []
     )
     assert db.scalars(select(Budget).where(Budget.user_id == user.id)).all() == []
+
+
+def _owned_count(session, model, user_id) -> int:
+    return session.scalar(
+        select(func.count()).select_from(model).where(model.user_id == user_id)
+    )
+
+
+def test_deleting_a_user_takes_their_phase_4_rows_with_them(db, user):
+    other = register_user(
+        db,
+        email=f"other-{uuid.uuid4().hex[:8]}@example.com",
+        password=PASSWORD,
+        display_name="Other User",
+        timezone="America/New_York",
+    )
+    db.commit()
+
+    _phase_4_rows(db, user)
+    _phase_4_rows(db, other)
+
+    victim_id, survivor_id = user.id, other.id
+    for model in PHASE_4_OWNED:
+        assert _owned_count(db, model, victim_id) == 1, f"{model.__name__} was not set up"
+
+    delete_user_account(db, user, PASSWORD, "DELETE")
+    db.commit()
+
+    # Read back through a fresh session: the claim being proven is that the
+    # database removed these rows, not that this session stopped mentioning them.
+    with SessionLocal() as fresh:
+        assert fresh.get(User, victim_id) is None
+        assert fresh.get(User, survivor_id) is not None
+        for model in PHASE_4_OWNED:
+            assert (
+                _owned_count(fresh, model, victim_id) == 0
+            ), f"{model.__name__} outlived its owner"
+            # The cascade is scoped to the deleted user: another account's loan,
+            # goal, visit and tracked place must be exactly where they were.
+            assert (
+                _owned_count(fresh, model, survivor_id) == 1
+            ), f"{model.__name__} deleted another user's row"

@@ -88,8 +88,12 @@ android {
         // 0.6.2: no new feature. The manifest still said 0.6.0 while the server had
         // moved on, so an installed APK could not be told apart from the first
         // 0.6.0 build. The version is the change.
-        versionCode = 9
-        versionName = "0.6.2"
+        // 0.6.6: aligned with the release tag, which is what the tag gate checks.
+        // The manifest had been left at 0.6.2 / 9 while 0.6.3-0.6.5 shipped, so no
+        // tag since could be verified. versionCode 10 is the next one after the
+        // published 0.6.2 build (9); no release ever used 10.
+        versionCode = 10
+        versionName = "0.6.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
