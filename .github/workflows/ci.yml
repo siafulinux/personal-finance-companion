@@ -6,6 +6,11 @@ name: CI
 # spends runner minutes on an identical SHA without adding a signal. Note that
 # naming `branches` here is what excludes tags -- a bare `push:` covers both.
 #
+# `merge_group` is what makes the merge queue work: a queued entry is a synthetic
+# commit on a throwaway ref, so a `pull_request` run cannot vouch for it. The
+# same suite runs again there, which is the price of the queue verifying the
+# exact tree that will land on the branch.
+#
 # `workflow_dispatch` is the escape hatch: when a release does need verifying on
 # demand, run the workflow from the Actions tab and pick the tag as the ref. A
 # manual run is a deliberate request, so it is the one path that tests a tag.
@@ -19,8 +24,13 @@ name: CI
 # 03:17 UTC keeps clear of the top-of-hour queue GitHub documents as busiest.
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!gh-readonly-queue/**"]
   pull_request:
+  # The merge queue builds each entry as a synthetic commit on a temporary ref, and
+  # only a `merge_group` run reports on it. Without this trigger the required
+  # checks would never arrive for a queued entry and every PR would sit in the
+  # queue until it timed out.
+  merge_group:
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"
@@ -47,19 +57,34 @@ jobs:
     # the fix PR would be blocked by the very failure it repairs, since a green
     # nightly cannot exist until the fix is merged.
     name: Nightly suite is green
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: read
+      pull-requests: read
     steps:
       - name: Read the last completed nightly run
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          QUEUE_HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           set -euo pipefail
+
+          # A merge_group payload carries no labels, so the waiver would silently
+          # stop applying to a PR that had it. The queue ref names the PR it is
+          # building (refs/heads/gh-readonly-queue/master/pr-123-abcdef), so read
+          # the labels the pull request gate already honoured.
+          labels="${LABELS:-}"
+          if [ "${GITHUB_EVENT_NAME:-}" = "merge_group" ] && [ -z "$labels" ]; then
+            pr=$(sed -n 's#.*/pr-\([0-9]\{1,\}\)-.*#\1#p' <<<"${QUEUE_HEAD_REF:-}")
+            if [ -n "$pr" ]; then
+              labels=$(gh api "repos/$REPO/pulls/$pr" --jq '[.labels[].name] | join(",")' 2>/dev/null || true)
+              [ -n "$labels" ] || echo "::notice::Could not read the labels of PR #$pr; treating it as unlabelled."
+            fi
+          fi
 
           # Fail closed: if the runs cannot be read, nothing proves the nightly
           # is green, and an unverified night is not a verified one.
@@ -98,9 +123,9 @@ jobs:
             exit 0
           fi
 
-          case ",${LABELS:-}," in
+          case ",${labels:-}," in
             *,nightly-fix,*)
-              echo "::warning::The last nightly failed ($url) but this PR carries the nightly-fix label, so it may proceed. The three test jobs are still required."
+              echo "::warning::The last nightly failed ($url) but this change carries the nightly-fix label, so it may proceed. The three test jobs are still required."
               exit 0
               ;;
           esac
