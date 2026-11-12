@@ -211,6 +211,11 @@ that the tagged commit is green, then reads that version's `CHANGELOG.md` sectio
 it as the release notes, titled `0.6.3 — release identification`. A tag with no changelog
 entry fails instead of publishing an empty release, and a tag whose release already exists
 is left alone so notes edited on GitHub (checksums, artifact details) survive a re-push.
+That second case is a warning, not a failure: a re-pointed tag can never publish again, so
+both gates and the publish job stand aside (`scripts/release-published`) and the run stays
+green with a `::warning::` annotation. A tag that cannot be checked — no `gh`, no auth, or
+an answer neither `200` nor `404` — is still an error, because guessing "already released"
+would skip a gate that protects a first publication.
 No artifact is attached: the APK is signed with a key that stays off CI, so it is uploaded
 by hand after `apksigner verify`.
 
