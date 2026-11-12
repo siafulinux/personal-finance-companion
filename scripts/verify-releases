@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Verify that published release notes still say what the changelog says.
+#
+#   scripts/verify-releases                 # every published release
+#   scripts/verify-releases v0.6.3          # one release
+#   scripts/verify-releases --ref v0.6.4    # read CHANGELOG.md from a git ref
+#
+# The Release workflow generates each release body from the tagged changelog, so
+# the body and the section start out identical and anything that makes them
+# differ afterwards is drift: notes edited on GitHub that the changelog never
+# learned about, or a changelog entry changed without updating the release. Both
+# leave a published page contradicting the repository, which is what this checks.
+#
+# The comparison applies the same normalisation the workflow does: a trailing
+# horizontal rule is the changelog's entry separator, not part of the notes, so
+# it is stripped before comparing.
+#
+# Releases whose notes were deliberately extended by hand are listed in
+# ALLOW_EXTRA below and reported as annotated. They are not silently skipped --
+# a new one has to be added here on purpose, and PFC_ALLOW_DRIFT="" enforces the
+# strict comparison for every release regardless.
+#
+# Exit codes: 0 verified, 1 drift found, 2 cannot verify (no gh, no changelog).
+set -euo pipefail
+
+# Releases whose published notes intentionally carry content the changelog does
+# not: the APK checksums and asset details are added after publication, because
+# the signing key stays off CI and the artifact is uploaded by hand.
+ALLOW_EXTRA=(v0.6.0)
+allowed=${PFC_ALLOW_DRIFT-$(printf '%s\n' "${ALLOW_EXTRA[@]}")}
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+fail() {
+  printf 'verify-releases: %s\n' "$*" >&2
+  exit 2
+}
+
+reject() {
+  printf 'verify-releases: %s\n' "$*" >&2
+  exit 1
+}
+
+ref=
+tags=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help) usage ;;
+    --ref)
+      [ $# -ge 2 ] || usage
+      ref=$2
+      shift 2
+      ;;
+    *)
+      tags+=("$1")
+      shift
+      ;;
+  esac
+done
+
+command -v gh >/dev/null 2>&1 ||
+  fail "the GitHub CLI (gh) is not installed, so the releases cannot be read."
+
+# Resolved from the script's own location so it works from any directory.
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd -- "$root"
+
+repository=${PFC_REPO:-$(git remote get-url origin 2>/dev/null |
+  sed -e 's#.*github\.com[:/]##' -e 's#\.git$##')}
+case $repository in
+  */*) ;;
+  *)
+    repository=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) ||
+      fail "cannot tell which GitHub repository this is; set PFC_REPO=owner/name."
+    ;;
+esac
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# The changelog is read from the working tree by default. A tag's own copy is
+# not the right reference here: several early tags were re-cut onto later
+# commits, so their tree can hold a different changelog than the release page
+# was generated from. --ref exists for the case where the historic text is what
+# you actually want to compare against.
+if [ -n "$ref" ]; then
+  git show "$ref:CHANGELOG.md" >"$work/CHANGELOG.md" 2>/dev/null ||
+    fail "cannot read CHANGELOG.md at $ref."
+  source=$ref
+else
+  cp CHANGELOG.md "$work/CHANGELOG.md"
+  source="working tree"
+fi
+
+if [ ${#tags[@]} -eq 0 ]; then
+  mapfile -t tags < <(gh release list --repo "$repository" --limit 100 \
+    --json tagName -q '.[].tagName' 2>/dev/null)
+  [ ${#tags[@]} -gt 0 ] ||
+    fail "cannot list the releases of $repository (check 'gh auth status')."
+fi
+
+drift=0
+invalid=0
+matched=0
+annotated=0
+
+for tag in "${tags[@]}"; do
+  if ! gh release view "$tag" --repo "$repository" --json body --jq .body \
+    >"$work/body.md" 2>"$work/err"; then
+    printf '%-10s NO RELEASE  %s\n' "$tag" "$(head -1 "$work/err")" >&2
+    invalid=$((invalid + 1))
+    continue
+  fi
+
+  result=$(python3 - "$tag" "$work/body.md" "$work/CHANGELOG.md" <<'PY'
+import difflib
+import pathlib
+import re
+import sys
+
+tag, body_path, changelog_path = sys.argv[1:4]
+version = tag[1:] if tag.startswith("v") else tag
+
+lines = pathlib.Path(changelog_path).read_text(encoding="utf-8").splitlines()
+heading = re.compile(r"^## \[([^\]]+)\]")
+starts = [i for i, line in enumerate(lines)
+          if (match := heading.match(line)) and match.group(1) == version]
+if not starts:
+    print("NO SECTION\nno '## [%s]' entry in the changelog" % version)
+    sys.exit()
+
+start = starts[0]
+end = next((j for j in range(start + 1, len(lines)) if heading.match(lines[j])),
+           len(lines))
+# The same normalisation as .github/workflows/release.yml, kept identical on
+# purpose: if the two ever disagree this check reports drift the workflow
+# itself creates.
+section = re.sub(r"\n\s*-{3,}\s*$", "", "\n".join(lines[start + 1:end])).strip()
+body = pathlib.Path(body_path).read_text(encoding="utf-8").strip()
+
+if section == body:
+    print("MATCH")
+    sys.exit()
+
+diff = difflib.unified_diff(section.splitlines(), body.splitlines(),
+                            "changelog", "release", lineterm="", n=1)
+print("DIFFERS")
+print(f"changelog {len(section)} chars, release {len(body)} chars")
+print("\n".join(list(diff)[:40]))
+PY
+  )
+
+  verdict=${result%%$'\n'*}
+  detail=${result#*$'\n'}
+  [ "$detail" = "$result" ] && detail=
+
+  case "$verdict" in
+    MATCH)
+      printf '%-10s ok\n' "$tag"
+      matched=$((matched + 1))
+      ;;
+    DIFFERS)
+      if printf '%s\n' "$allowed" | grep -Fxq -- "$tag"; then
+        printf '%-10s ok (annotated by hand, allowed)\n' "$tag"
+        annotated=$((annotated + 1))
+      else
+        printf '%-10s DRIFT\n' "$tag"
+        printf '%s\n' "$detail" | sed 's/^/             /'
+        drift=$((drift + 1))
+      fi
+      ;;
+    NO\ SECTION)
+      printf '%-10s NO CHANGELOG ENTRY  %s\n' "$tag" "$detail"
+      invalid=$((invalid + 1))
+      ;;
+    *)
+      printf '%-10s UNREADABLE  %s\n' "$tag" "$verdict"
+      invalid=$((invalid + 1))
+      ;;
+  esac
+done
+
+printf '\n%d matched, %d annotated, %d drifted, %d unverifiable (%s, %s)\n' \
+  "$matched" "$annotated" "$drift" "$invalid" "$repository" "$source"
+
+if [ "$drift" -gt 0 ]; then
+  reject "$drift release(s) disagree with the changelog. Update the note or the changelog so they agree."
+fi
+if [ "$invalid" -gt 0 ]; then
+  reject "$invalid release(s) could not be compared."
+fi
+printf 'verify-releases: every published release matches its changelog section.\n'
