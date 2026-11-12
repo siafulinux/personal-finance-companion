@@ -728,7 +728,8 @@ export interface ServerInfo {
   app_name: string;
   server_name: string;
   version: string;
-  release_tag: string;
+  //: Stamped into the image at build time; null when the build was not a release.
+  release_tag: string | null;
   api_version: number;
   min_client_api_version: number;
   api_base_url: string;

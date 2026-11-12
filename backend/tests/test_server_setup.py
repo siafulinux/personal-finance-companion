@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.api import server as server_api
 from app.config import settings
-from app.version import RELEASE_TAG
+from app.version import release_tag
 
 SETUP = {
     "server_name": "Home Finance",
@@ -49,14 +49,50 @@ def test_info_is_public_and_reveals_no_secrets(client):
     assert body["api_base_url"].endswith("/api/v1")
     assert body["version"] and body["api_version"] >= 1
     # The release tag is public on purpose: it names the source this build came
-    # from, so an installation can be identified without shell access.
-    assert body["release_tag"] == RELEASE_TAG
-    assert body["release_tag"].startswith("v")
+    # from, so an installation can be identified without shell access. It is
+    # absent unless a build stamped one, which a test run never does.
+    assert "release_tag" in body
     # The endpoint is unauthenticated: it must not describe the database, the
     # secret key, cookies or any account.
     lowered = response.text.lower()
     for forbidden in ("postgres", "password", "secret_key", "cookie", "@example.com"):
         assert forbidden not in lowered
+
+
+def test_info_reports_the_release_stamped_into_the_image(client, monkeypatch):
+    """The tag comes from the build, so /server/info must echo whatever built it.
+
+    This is what makes a Docker tag self-describing: no source constant is
+    edited, and a release cannot advertise the previous tag by mistake.
+    """
+    monkeypatch.setenv("PFC_RELEASE_TAG", "v0.6.3")
+    assert client.get("/api/v1/server/info").json()["release_tag"] == "v0.6.3"
+
+    # Same process, different stamp: the value is read per request, not cached
+    # at import, so the image's environment is the only source.
+    monkeypatch.setenv("PFC_RELEASE_TAG", "v0.7.0")
+    assert client.get("/api/v1/server/info").json()["release_tag"] == "v0.7.0"
+
+
+def test_an_unstamped_build_reports_no_release_tag(client, monkeypatch):
+    # A source checkout or a test run is not a release; it must not claim one.
+    monkeypatch.delenv("PFC_RELEASE_TAG", raising=False)
+    assert client.get("/api/v1/server/info").json()["release_tag"] is None
+
+
+def test_release_tag_normalises_a_bare_version(monkeypatch):
+    # `--build-arg PFC_RELEASE_TAG=0.6.3` and compose's `v0.6.3` are the same
+    # release, so both read back as a tag.
+    monkeypatch.setenv("PFC_RELEASE_TAG", " 0.6.3 ")
+    assert release_tag() == "v0.6.3"
+    monkeypatch.setenv("PFC_RELEASE_TAG", "v0.6.3")
+    assert release_tag() == "v0.6.3"
+
+
+def test_blank_release_tag_counts_as_unstamped(monkeypatch):
+    # The Dockerfile defaults the argument to "", so an unset build lands here.
+    monkeypatch.setenv("PFC_RELEASE_TAG", "   ")
+    assert release_tag() is None
 
 
 def test_setup_creates_the_administrator_and_closes_the_wizard(client):

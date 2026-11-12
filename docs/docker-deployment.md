@@ -24,8 +24,19 @@ bridge network, the web container on `edge`, and `caddy` joins both — which is
 half of the stack can reach the other's database or peers.
 
 Why the image tag is `2.0.0` everywhere: `deploy/docker/compose.yaml` pins
-`PFC_IMAGE_TAG`, and `backend/app/version.py` is the single source for what `/server/info`
-advertises. Bump both together in a release.
+`PFC_IMAGE_TAG`, and the release tag an image reports is stamped from it at build time.
+Compose passes `PFC_RELEASE_TAG: v${PFC_IMAGE_TAG}` as a build argument, the API
+`Dockerfile` bakes it into the image, and `/server/info` reads it back per request — so
+the `0.6.3` image reports `v0.6.3` and there is no constant to bump or forget. A build
+straight from `docker build` needs the argument explicitly:
+
+```bash
+docker build -f deploy/docker/Dockerfile.api \
+  --build-arg PFC_RELEASE_TAG=v0.6.3 -t pfc-api:0.6.3 .
+```
+
+Omit it and the server reports `release_tag: null` — the honest answer for a build that is
+not a release, rather than the tag of whatever release happened to be last.
 
 Ports 8088/8448 were chosen because this host already runs services on 80/443. On a
 dedicated machine use `PFC_HTTP_PORT=80` and `PFC_HTTPS_PORT=443`.
