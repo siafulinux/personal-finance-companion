@@ -304,3 +304,65 @@ are avoided" card states the three rules that keep a repayment from being counte
 transfers between your own accounts are never income or spending, card repayments settle a
 liability rather than being purchases, and a loan instalment already covered by a recorded
 repayment is not listed again.
+
+### Screens captured later (2026-11-12)
+
+Six more, taken from the current tree rather than the `0.6.0` build: the web app served at
+`10.0.2.2:8088` as seen from the emulator, and the Android release APK (`versionCode 9`,
+`versionName 0.6.2`). The account is `demo@example.com`, the flagged demo account from
+`pfc seed-demo`, extended through the API with two loans, two savings goals, two tracked places
+and six visits. Everything in them is synthetic; `pfc seed-demo --remove` deletes the account and
+its rows.
+
+**Web — Loans & advances** — two liabilities, `$8,506.66` outstanding of `$12,160.00` borrowed:
+
+![Web loans page with a repayment plan and a buy-now-pay-later instalment](../screenshots/web-loans.png)
+
+The car loan carries `$8,400.00` of `$12,000.00`, APR `7.90%`, an estimated payoff of Feb 20, 2029
+and 28 payments left; the Afterpay plan shows `$106.66` of `$160.00` over its last 2 instalments.
+Both cards report `0.00%` repaid because no repayment has been confirmed yet, and the closing
+card explains why a balance derived from incomplete terms is labelled an estimate.
+
+**Web — Savings goals** — `$2,250.00` saved of `$7,500.00`, of which `$750.00` is protected:
+
+![Web savings page with a virtual allocation and an account-backed goal](../screenshots/web-savings.png)
+
+Christmas is a virtual goal at `$750.00` of `$1,500.00` with `$100.00` planned monthly, and the
+page says where that pace lands (`Aug 12, 2027`) rather than promising a date. The emergency fund
+is account-backed: its `$1,500.00` already sits outside Safe-to-Spend, so the page states that
+nothing further is deducted — the double-deduction the feature has to avoid.
+
+**Web — Unified obligations** — `$2,406.92` due across 10 items through Dec 27, 2026:
+
+![Web obligations page with one ordered list and the overlap rules](../screenshots/web-obligations.png)
+
+The list interleaves an Afterpay instalment, three recurring bills and the car-loan repayment in
+one date order, with `$0.00` before the Nov 13 payday and `$0.00` overdue. The paycheck is shown
+separately and explicitly not netted off, and the closing card states the three rules that keep
+one obligation from being counted twice.
+
+**Web — Shopping Check and Shopping Intelligence** — spend guidance plus the location controls:
+
+![Web Shopping Check with category headroom, tracked places and visit history](../screenshots/web-shopping.png)
+
+The Safe-to-Spend panel shows `$0.00` clamped with the `$319.89` shortfall named, the category
+headroom list is per category, and two tracked places report their visit counts and monthly
+budget usage. Shopping Intelligence is on, with the cooldown and retention controls visible, and
+the visit history lists each arrival with "no matching purchase" — a visit is never a transaction.
+
+**Android — Plan** — the index the Phase 4 sections were given after the walkthrough:
+
+![Android Plan tab indexing loans, savings and obligations](../screenshots/android-plan.png)
+
+Three entries — Loans & advances, Savings goals, Obligations — each with the sentence that says
+what is behind it. Before this tab, those screens were reachable only from a card low on the
+dashboard and had no route back.
+
+**Android — Shopping Intelligence settings** — consent, monitoring and quiet-hours controls:
+
+![Android Shopping Intelligence settings with monitoring switches and pause control](../screenshots/android-shopping-intelligence.png)
+
+The three switches are the capability itself: use my location, watch the places I saved, discover
+new places. The screen states that saved places use Android geofences, that new places are only
+looked for when movement stops, and offers Pause for 2 hours, while the notification card caps
+arrivals at one per 120 minutes.
