@@ -24,7 +24,30 @@ import {
 function statusBadge(provider: ProviderAdmin) {
   if (!provider.configured) return <Badge tone="warning">Needs credentials</Badge>;
   if (!provider.enabled) return <Badge tone="neutral">Disabled</Badge>;
+  if (!provider.last_test?.at) return <Badge tone="warning">Untested</Badge>;
   return <Badge tone="positive">Ready</Badge>;
+}
+
+/**
+ * Why a switched-on provider still cannot connect anybody, or null when it can.
+ *
+ * Both cases look configured on screen -- the switch is on -- but the server has
+ * nothing usable, and the failure only surfaces when a user tries to link an
+ * institution and is told no provider supports it.
+ */
+function connectionBlocker(provider: ProviderAdmin): string | null {
+  if (!provider.enabled) return null;
+  if (!provider.configured) {
+    return provider.missing.length
+      ? `Switched on, but ${provider.missing.join(" and ")} ${
+          provider.missing.length === 1 ? "is" : "are"
+        } not saved, so nothing can connect through it.`
+      : "Switched on, but no credentials are saved, so nothing can connect through it.";
+  }
+  if (!provider.last_test?.at) {
+    return "Credentials are saved but have never been tested, so a rejected key would only surface when a user tries to connect.";
+  }
+  return null;
 }
 
 function CredentialInput({
@@ -389,6 +412,9 @@ export function ProvidersPage() {
   }
 
   const overview: ProviderOverview = overviewQuery.data;
+  const blockers = overview.providers
+    .map((provider) => ({ provider, message: connectionBlocker(provider) }))
+    .filter((row): row is { provider: ProviderAdmin; message: string } => row.message !== null);
   const primary = overview.providers.find((p) => p.usable)?.name ?? null;
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["provider-overview"] });
@@ -402,6 +428,23 @@ export function ProvidersPage() {
         title="Financial providers"
         description="Configure the aggregators this server uses to connect institutions. Users never see this screen: they only search for their institution and approve access."
       />
+
+      {blockers.length ? (
+        <Card>
+          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Not ready to connect anyone yet</h2>
+          <p className="tiny muted" style={{ margin: "0.25rem 0 0.6rem" }}>
+            These providers are switched on but cannot serve a connection. Users are told their
+            institution is unavailable, with no sign that the cause is server-side.
+          </p>
+          <ul className="page-stack" style={{ gap: "0.35rem", margin: 0, paddingLeft: "1.1rem" }}>
+            {blockers.map(({ provider, message }) => (
+              <li key={provider.name} className="small">
+                <strong>{provider.label}</strong> — {message}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <Card>
         <div className="list-row" style={{ alignItems: "center", gap: "0.75rem" }}>
