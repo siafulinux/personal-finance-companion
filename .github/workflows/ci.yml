@@ -32,6 +32,14 @@ on:
   # queue until it timed out.
   merge_group:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Nightly alert only: report what the job would do without touching the
+          issue tracker. Set false to rehearse the mutating path — do that on a
+          throwaway branch, never on master. Schedule runs always act for real.
+        type: boolean
+        default: true
   schedule:
     - cron: "17 3 * * *"
 
@@ -479,14 +487,33 @@ jobs:
     # has stopped happening. The close runs only when all three suites passed -- a
     # cancelled or skipped night proves nothing and leaves the issue alone, which
     # is the same rule the `Nightly suite is green` gate applies.
+    #
+    # Rehearsing it: dispatch the CI workflow by hand and the job runs in dry-run
+    # mode, printing the issue it would open or the ones it would close. Dispatch
+    # from a branch, not from `master` -- a manual run still records a CI run for
+    # its commit, and a failing one becomes the newest run for that commit, which
+    # is what the tag gate reads.
     name: Nightly failure alert
     # `release-notes` is listed so a drift-only night is reported at all, and so
     # the close step cannot retire an issue while a release body still disagrees
     # with its changelog section.
     needs: [backend, web, android, release-notes]
-    if: always() && github.event_name == 'schedule'
+    # Runs on the schedule, and on demand so the job itself can be exercised
+    # without waiting for a red night. A manual run is a dry run unless `dry_run`
+    # is deliberately set to false: it reports every decision the real night would
+    # make and changes nothing, so firing it can never file, comment on or close
+    # an issue on the default branch. A dispatch is also the only way to rehearse
+    # the `release-notes` failure path above, since a drift-only night is otherwise
+    # the one failure that cannot be produced on demand.
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # Read through `github.event.inputs`, not the `inputs` context: the latter is
+      # only defined for manually triggered runs, and this job also runs on a
+      # schedule. A `schedule` payload has no inputs, so the right-hand side is
+      # empty and the nightly always acts for real.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run }}
     permissions:
       contents: read
       issues: write
@@ -507,14 +534,19 @@ jobs:
 
           short=${SHA:0:7}
           today=$(date -u +%Y-%m-%d)
+          dry=${DRY_RUN:-false}
 
           # Labels are referenced by name when the issue is created, so make sure
           # it exists. A 422 means it already does, which is the normal case.
-          gh api "repos/$REPO/labels" -X POST \
-            -f name=ci-nightly \
-            -f color=B60205 \
-            -f description="A scheduled CI run failed on the default branch" \
-            >/dev/null 2>&1 || true
+          if [ "$dry" = "true" ]; then
+            echo "::notice::Dry run: the ci-nightly label would be created if missing."
+          else
+            gh api "repos/$REPO/labels" -X POST \
+              -f name=ci-nightly \
+              -f color=B60205 \
+              -f description="A scheduled CI run failed on the default branch" \
+              >/dev/null 2>&1 || true
+          fi
 
           body=$(cat <<EOF
           The scheduled CI run on \`master\` failed at commit \`$short\` on $today.
@@ -557,6 +589,18 @@ jobs:
           existing=$(gh issue list --repo "$REPO" --label ci-nightly --state open \
             --limit 1 --json number --jq '.[0].number // empty')
 
+          # Everything above is read-only, so a dry run still shows the real
+          # decision — including which issue it would land on.
+          if [ "$dry" = "true" ]; then
+            if [ -n "$existing" ]; then
+              echo "::notice::Dry run: would comment on the existing issue #$existing."
+            else
+              echo "::notice::Dry run: would open a new issue titled 'Nightly CI failed on master'."
+            fi
+            printf '\n----- issue body that would be posted -----\n%s\n-------------------------------------------\n' "$body"
+            exit 0
+          fi
+
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
             echo "::notice::Commented on the existing nightly failure issue #$existing."
@@ -579,6 +623,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          dry=${DRY_RUN:-false}
+
           # Every open one, not just the first: the alert only ever creates one, but
           # a hand-filed duplicate should not outlive the failure it describes.
           open=$(gh issue list --repo "$REPO" --label ci-nightly --state open \
@@ -586,6 +632,11 @@ jobs:
 
           if [ -z "$open" ]; then
             echo "No open ci-nightly issue; the night is green and there is nothing to close."
+            exit 0
+          fi
+
+          if [ "$dry" = "true" ]; then
+            echo "::notice::Dry run: would comment on and close issue(s): $(echo $open)."
             exit 0
           fi
 

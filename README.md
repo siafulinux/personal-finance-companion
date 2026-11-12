@@ -197,6 +197,15 @@ push the older commit as the tip of its own branch first. A pull request's head 
 verified by both the `push` and the `pull_request` runs, which is why PR checks can list the
 same job twice.
 
+Merge commits are disabled on the repository, so a pull request reaches `master` either as a
+single squashed commit or as its commits rebased one by one. **Squash is what the tag gate
+wants**, and it is worth knowing why before reaching for rebase: the squashed commit is a
+tip, so it carries its own CI run and can be tagged directly. A rebase puts N commits on
+`master` and verifies only the last of them, leaving the ones beneath it with no run —
+taggable only after each is pushed as the tip of its own branch. The squash subject is the
+pull request's title (or its single commit's), and the body is the commit messages, which
+keeps the `(#123)` reference in the subject that `git log --grep` finds.
+
 The check reads the runs through the GitHub CLI, so `gh auth login` must have been done once.
 When it cannot reach GitHub it refuses rather than allowing the tag — a release that cannot
 be verified is not treated as verified.
@@ -310,13 +319,25 @@ date, or a fixture that aged out. Scheduled runs always use the default branch's
 workflow, and GitHub disables the schedule after 60 days without repository activity — the
 next push turns it back on.
 
-A red night also files an issue. The `Nightly failure alert` job runs only for a failed
-schedule, and updates one open `ci-nightly` issue rather than opening a new one each night:
+A red night also files an issue. The `Nightly failure alert` job runs for a failed
+night, and updates one open `ci-nightly` issue rather than opening a new one each time:
 a duplicate per red run would bury the same breakage. The issue carries the run link, each
 job's result and the local commands to reproduce it. Each job is listed by the name it
 reports under, and when `Release notes match the changelog` is the one that failed the issue
 says what that means — a release body disagreeing with the changelog, fixed by editing one or
 the other, with no application code involved.
+
+The same job can be fired by hand **in dry-run mode**, so the alert can be exercised without
+waiting for a real red night and without touching the issue tracker. It prints the issue it
+would open, or the ones it would close, and changes nothing:
+
+```bash
+gh workflow run CI --ref <branch>             # dry run: reports, mutates nothing
+gh workflow run CI --ref <branch> -f dry_run=false   # the real path, on a throwaway branch
+```
+
+Dispatch from a branch rather than `master`: a manual run still records a CI run for its
+commit, so a failing one would become the newest run the tag gate reads for that commit.
 
 The first green night closes it again, with a comment naming the commit and the passing run.
 An issue that outlives its failure is worse than none — it trains whoever reads the list to
@@ -358,6 +379,52 @@ TODAY="2028-02-29 12:00:00"
 LD_PRELOAD=$(ls /usr/lib/*/faketime/libfaketime.so.1) FAKETIME="@$TODAY" \
   FAKETIME_DONT_FAKE_MONOTONIC=1 .venv/bin/python -m pytest
 ```
+
+## Merge queue
+
+`.github/workflows/ci.yml` runs on `merge_group` as well as `push` and `pull_request`. That
+trigger is not there by accident. A merge queue does not test a pull request where it sits:
+it builds a synthetic commit on a throwaway `gh-readonly-queue/<branch>/pr-<n>-<sha>` ref and
+waits for statuses on *that* commit. Only a `merge_group` run reports there, so without the
+trigger every required check would stay missing and each queued entry would sit until it
+timed out.
+
+**No queue is enabled on this repository, and it cannot be yet.** GitHub offers merge queues
+only to organization-owned repositories. This one belongs to a personal account, which the
+API says plainly:
+
+```console
+$ gh api graphql -f query='{repository(owner:"siafulinux",name:"personal-finance-companion"){mergeQueue{id}}}'
+{"data":{"repository":{"mergeQueue":null}}}
+
+$ gh api -X PUT .../rulesets/26975686 ... "merge_queue"
+gh: Invalid rule 'merge_queue'
+```
+
+The trigger is therefore inert, not wrong. It costs nothing while unused — no queue means no
+`merge_group` event to respond to — and `push` explicitly ignores `gh-readonly-queue/**`, so
+the queue ref could never start a second run of the same suite for the same tree.
+
+What stands in for the queue today is the ruleset **`master requires green CI`** (id
+`26975686`): six required checks (`Backend tests`, `Web typecheck and tests`, `Android
+unit tests`, `Nightly suite is green`, `Documented images and links`, `Release notes match
+the changelog`) plus `strict_required_status_checks_policy`, so a pull request must
+contain current `master` and re-passes CI after every rebase. That serialises
+merges one at a time — the rebase-and-rerun cycle a queue would batch for you, and the
+reason a queue is worth having at all.
+
+To turn it on, in this order:
+
+1. Move the repository into an organization; a free plan is enough. Tags, releases, Actions
+   history, the ruleset and open pull requests move with it.
+2. Add a `merge_queue` rule to ruleset `26975686`, with `squash` as the merge method.
+   Merge commits are disabled on this repository, so an entry set to `merge_commit` could
+   not land at all. `squash` also matches how pull requests already arrive here, and keeps
+   every entry one commit — the shape the release gate can tag. `rebase` is available and
+   would work, but it turns each entry into several commits where only the tip is verified,
+   the same caveat the release section describes.
+3. Leave the `merge_group` trigger and the `gh-readonly-queue/**` exclusion in the workflow.
+   They are what makes step 2 work, and they look unused until it exists.
 
 ## Android app
 
