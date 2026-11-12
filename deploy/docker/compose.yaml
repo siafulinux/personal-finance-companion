@@ -19,6 +19,10 @@ x-api: &api
   build:
     context: ../..
     dockerfile: deploy/docker/Dockerfile.api
+    args:
+      # The image tag is the release, so the image stamps itself with it and
+      # /server/info can never advertise a tag this build did not come from.
+      PFC_RELEASE_TAG: v${PFC_IMAGE_TAG:-2.1.0}
   restart: unless-stopped
   networks:
     - backend

@@ -35,6 +35,14 @@ USER pfc
 COPY --chown=pfc:pfc deploy/docker/api-entrypoint.sh /usr/local/bin/api-entrypoint
 RUN chmod +x /usr/local/bin/api-entrypoint
 
+# The release this image was cut from. Compose fills it from PFC_IMAGE_TAG, so the
+# image cannot advertise a tag it was not built from; a manual build passes
+# --build-arg PFC_RELEASE_TAG=v0.6.3. Declared last so changing the release does
+# not invalidate the dependency layers above, and /server/info reads it back at
+# runtime rather than from a constant in the source.
+ARG PFC_RELEASE_TAG=""
+ENV PFC_RELEASE_TAG=${PFC_RELEASE_TAG}
+
 EXPOSE 8000
 
 ENTRYPOINT ["/usr/local/bin/api-entrypoint"]

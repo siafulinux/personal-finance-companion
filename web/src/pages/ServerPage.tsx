@@ -164,7 +164,7 @@ export function ServerPage() {
         <CopyRow label="Web application" value={server.web_url} />
         <CopyRow label="API base URL" value={server.api_base_url} />
         <CopyRow label="Server version" value={`${server.version} (API v${server.api_version})`} />
-        <CopyRow label="Release tag" value={server.release_tag} />
+        <CopyRow label="Release tag" value={server.release_tag ?? "Not stamped (built from a source checkout)"} />
         <p className="tiny" style={{ marginTop: "0.8rem" }}>
           On a home network the web address is what you type in a browser. From a phone on the
           same network, replace <span className="mono">localhost</span> with this machine's LAN
