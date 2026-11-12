@@ -85,8 +85,8 @@ android {
         // 0.6.0: Phase 4 — loans and advances, savings goals, unified obligations,
         // the Safe-to-Spend breakdown, merchant insights and location-aware
         // Shopping Intelligence.
-        versionCode = 10
-        versionName = "0.6.4"
+        versionCode = 11
+        versionName = "0.6.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
