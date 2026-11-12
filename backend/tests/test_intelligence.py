@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -133,7 +133,7 @@ def test_confirmed_category_is_never_overwritten(db, user, account):
 
 def test_user_history_outranks_the_generic_rule(db, user, account):
     shopping = _cat(db, user, "Shopping")
-    today = date.today()
+    today = today_in(user.timezone)
     for offset in (60, 40, 20):
         _txn(
             db,
@@ -162,7 +162,7 @@ def test_income_needs_no_category_suggestion(db, user, account):
 # -------------------------------------------------------------------- recurring
 def test_recurring_detection_finds_a_monthly_subscription(db, user, account, categories):
     entertainment = _cat(db, user, "Entertainment")
-    today = date.today()
+    today = today_in(user.timezone)
     for offset in (3, 2, 1):
         when = add_months(today, -offset).replace(day=12)
         _txn(
@@ -190,7 +190,7 @@ def test_recurring_detection_finds_a_monthly_subscription(db, user, account, cat
 
 
 def test_recurring_detection_needs_three_occurrences(db, user, account):
-    today = date.today()
+    today = today_in(user.timezone)
     for offset in (2, 1):
         _txn(
             db,
@@ -205,7 +205,7 @@ def test_recurring_detection_needs_three_occurrences(db, user, account):
 
 
 def test_irregular_spending_is_not_a_series(db, user, account):
-    today = date.today()
+    today = today_in(user.timezone)
     for days in (120, 60, 12):
         _txn(
             db,
@@ -221,7 +221,7 @@ def test_irregular_spending_is_not_a_series(db, user, account):
 
 
 def test_dismissed_series_stays_dismissed(db, user, account):
-    today = date.today()
+    today = today_in(user.timezone)
     for offset in (3, 2, 1):
         _txn(
             db,

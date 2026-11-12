@@ -6,11 +6,14 @@ server, so they assert refusals as carefully as successes.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import text
 
 from app.api import server as server_api
 from app.config import settings
+from app.utils.dates import utc_now
 from app.version import release_tag
 
 SETUP = {
@@ -224,7 +227,12 @@ def test_expired_pairing_code_is_rejected(client, db):
     code = client.post(
         "/api/v1/server/pairing", json={}, headers=_bearer(token)
     ).json()["token"]
-    db.execute(text("update pairing_tokens set expires_at = now() - interval '1 minute'"))
+    # Expire it against the application's clock, not the database's: `now()` is
+    # the DB server's time, and this test should not depend on the two agreeing.
+    db.execute(
+        text("update pairing_tokens set expires_at = :past"),
+        {"past": utc_now() - timedelta(minutes=1)},
+    )
     db.commit()
 
     response = client.post("/api/v1/server/pair", json={"token": code})

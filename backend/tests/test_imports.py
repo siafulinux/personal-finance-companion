@@ -104,12 +104,14 @@ def test_scenario_g_duplicate_import_creates_no_duplicates(auth_client, db, user
     assert occurrence.paid_amount == D("95.00")
 
 
-def test_invalid_rows_are_rejected_with_reasons(auth_client, db, user, account):
+def test_invalid_rows_are_rejected_with_reasons(auth_client, db, user, account, today):
+    # Dated relative to the run date: a hardcoded future date is a *different*
+    # rejection (future-dated row), which would change the counts asserted here.
     content = (
         "Date,Description,Amount\n"
         "not-a-date,Broken row,-10.00\n"
-        "2026-11-01,Zero amount,0.00\n"
-        "2026-11-02,Valid purchase,-12.34\n"
+        f"{(today - timedelta(days=4)).isoformat()},Zero amount,0.00\n"
+        f"{(today - timedelta(days=3)).isoformat()},Valid purchase,-12.34\n"
     )
     response = upload(auth_client, account.id, content.encode())
     assert response.status_code == 201
@@ -127,10 +129,11 @@ def test_invalid_rows_are_rejected_with_reasons(auth_client, db, user, account):
     assert commit.json()["rejected"] == 2
 
 
-def test_mapping_correction(auth_client, db, user, account):
+def test_mapping_correction(auth_client, db, user, account, today):
+    when = today - timedelta(days=3)
     content = (
         "When,What,How Much,Who\n"
-        "11/05/2026,Corner store,-$12.50,Bodega\n"
+        f"{when.strftime('%m/%d/%Y')},Corner store,-$12.50,Bodega\n"
     )
     response = upload(auth_client, account.id, content.encode())
     assert response.status_code == 201, response.text
@@ -149,16 +152,16 @@ def test_mapping_correction(auth_client, db, user, account):
     )
     assert updated.status_code == 200, updated.text
     row = updated.json()["rows"][0]
-    assert row["date"] == "2026-11-05"
+    assert row["date"] == when.isoformat()
     assert row["amount"] == "12.50"
     assert row["status"] == "ok"
 
 
-def test_debit_credit_columns(auth_client, db, user, account):
+def test_debit_credit_columns(auth_client, db, user, account, today):
     content = (
         "Date,Description,Debit,Credit\n"
-        "2026-11-01,Rent payment,1200.00,\n"
-        "2026-11-02,Refund from store,,25.00\n"
+        f"{(today - timedelta(days=4)).isoformat()},Rent payment,1200.00,\n"
+        f"{(today - timedelta(days=3)).isoformat()},Refund from store,,25.00\n"
     )
     response = upload(auth_client, account.id, content.encode())
     preview = response.json()["preview"]
@@ -187,18 +190,16 @@ def test_parse_date_formats():
     assert parse_date("2026/11/02").isoformat() == "2026-11-02"
 
 
-def test_large_uploaded_file_is_rejected(auth_client, account):
-    content = b"Date,Description,Amount\n" + b"2026-11-01,Test,-1.00\n" * 6000
+def test_large_uploaded_file_is_rejected(auth_client, account, today):
+    row = f"{(today - timedelta(days=1)).isoformat()},Test,-1.00\n".encode()
+    content = b"Date,Description,Amount\n" + row * 6000
     response = upload(auth_client, account.id, content)
     assert response.status_code == 422
 
 
-def test_import_history(auth_client, account):
-    response = upload(
-        auth_client,
-        account.id,
-        b"Date,Description,Amount\n2026-11-01,Coffee,-4.50\n",
-    )
+def test_import_history(auth_client, account, today):
+    rows = f"Date,Description,Amount\n{(today - timedelta(days=1)).isoformat()},Coffee,-4.50\n"
+    response = upload(auth_client, account.id, rows.encode())
     assert response.status_code == 201
     history = auth_client.get("/api/v1/imports")
     assert history.status_code == 200
