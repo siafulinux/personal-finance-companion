@@ -24,6 +24,14 @@ nothing on the page said so.
 - **An `Untested` badge** for enabled providers whose credentials have never been tested,
   instead of `Ready`.
 
+### Changed
+
+- **The release tag is stamped by the image build.** Compose passes
+  `PFC_RELEASE_TAG: v${PFC_IMAGE_TAG}` as a build argument and the API image bakes it in, so
+  the `0.6.4` image reports `v0.6.4` and there is no constant to bump or forget. A build made
+  with a bare `docker build` reports `release_tag: null` — the honest answer for something
+  that is not a release, rather than the tag of whichever release happened to be last.
+
 ### Fixed
 
 - **Card action rows wrap instead of squeezing** on the Android Loans, Savings and Shopping
