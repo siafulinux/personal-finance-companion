@@ -12,6 +12,7 @@ from app.models import (
     Bill,
     BillOccurrence,
     Budget,
+    BudgetAllocation,
     Category,
     FinancialAccount,
     IncomeSource,
@@ -77,8 +78,16 @@ def remove_demo(db: Session, email: str) -> int:
         db.query(FinancialAccount).filter(FinancialAccount.user_id == user.id).delete(
             synchronize_session=False
         )
-        for budget in db.scalars(select(Budget).where(Budget.user_id == user.id)):
-            db.delete(budget)
+        # Allocations go first, by bulk delete, and *before* categories and the user
+        # row. `budget_allocations.category_id` and `budgets.user_id` are ON DELETE
+        # CASCADE, so those later deletes already remove the rows in the database;
+        # loading each budget and calling db.delete() asked the ORM for a second
+        # DELETE that matched nothing, which SQLAlchemy reports as "expected to
+        # delete N row(s); 0 were matched". Same ordering as delete_user_account.
+        db.query(BudgetAllocation).filter(
+            BudgetAllocation.budget_id.in_(select(Budget.id).where(Budget.user_id == user.id))
+        ).delete(synchronize_session=False)
+        db.query(Budget).filter(Budget.user_id == user.id).delete(synchronize_session=False)
         db.query(Category).filter(Category.user_id == user.id).delete(synchronize_session=False)
         db.delete(user)
         removed += 1
