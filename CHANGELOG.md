@@ -8,6 +8,37 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.4] — 2026-11-11 — a provider that cannot connect anybody says so
+
+A provider switched on without usable credentials looked ready on the Providers screen: the
+switch was on, the badge said "Ready", and the failure only appeared when a user searched
+for their institution and was told nobody supported it. The cause was server-side, but
+nothing on the page said so.
+
+### Added
+
+- **A "not ready to connect anyone yet" panel** on the Providers screen, listing every
+  enabled provider that cannot serve a connection and why: credentials switched on but not
+  saved (naming the missing fields), or saved but never tested, where a rejected key would
+  stay invisible until a real user tried to link.
+- **An `Untested` badge** for enabled providers whose credentials have never been tested,
+  instead of `Ready`.
+
+### Fixed
+
+- **Card action rows wrap instead of squeezing** on the Android Loans, Savings and Shopping
+  Check screens. A `Row` shrinks its children rather than wrapping, so a busy row collided two
+  balance pills or broke a label mid-word ("Remov/e"). Each is a `FlowRow` now, with labels
+  held to one line so a future squeeze ellipsises.
+
+### Notes
+
+- The page already fetched this state; nothing new is exposed and no credential value is
+  rendered. Both warnings come from `configured`, `missing` and `last_test`, so an
+  administrator sees the same facts the connection path acts on.
+
+---
+
 ## [0.6.3] — 2026-11-11 — release identification
 
 An installation could report the product version it runs (`2.1.0`) but not which release it
