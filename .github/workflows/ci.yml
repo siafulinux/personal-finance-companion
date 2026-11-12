@@ -219,3 +219,80 @@ jobs:
             echo "::error::pfcApiBaseUrl did not reach the APK; the override is broken"
             exit 1
           }
+
+  nightly-alert:
+    # A nightly failure has nobody watching it: it arrives at 03:17 with no push
+    # and no author, and the next person to notice is whoever reads the Actions
+    # tab days later. This files an issue instead.
+    #
+    # One issue, reopened by comment: a new issue every red night would bury the
+    # repository in duplicates of the same breakage, so an open `ci-nightly`
+    # issue is updated rather than duplicated.
+    name: Nightly failure alert
+    needs: [backend, web, android]
+    if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the nightly failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BACKEND: ${{ needs.backend.result }}
+          WEB: ${{ needs.web.result }}
+          ANDROID: ${{ needs.android.result }}
+        run: |
+          set -euo pipefail
+
+          short=${SHA:0:7}
+          today=$(date -u +%Y-%m-%d)
+
+          # Labels are referenced by name when the issue is created, so make sure
+          # it exists. A 422 means it already does, which is the normal case.
+          gh api "repos/$REPO/labels" -X POST \
+            -f name=ci-nightly \
+            -f color=B60205 \
+            -f description="A scheduled CI run failed on the default branch" \
+            >/dev/null 2>&1 || true
+
+          body=$(cat <<EOF
+          The scheduled CI run on \`master\` failed at commit \`$short\` on $today.
+
+          - [Run log]($RUN_URL)
+          - Backend tests: **$BACKEND**
+          - Web typecheck and tests: **$WEB**
+          - Android unit tests: **$ANDROID**
+
+          Nothing was pushed to cause this: a nightly failure usually means drift from
+          outside the repository — a dependency release, a test that only fails on a
+          particular calendar date, or a fixture that aged out. Reproduce locally with
+          the same timezone the runners use before assuming the code changed:
+
+          \`\`\`bash
+          cd backend && TZ=UTC .venv/bin/python -m pytest
+          cd web && npm test
+          cd android && ./gradlew :app:testDebugUnitTest
+          \`\`\`
+
+          A red nightly blocks the next merge through the \`Nightly suite is green\`
+          check, so this is not advisory.
+          EOF
+          )
+
+          existing=$(gh issue list --repo "$REPO" --label ci-nightly --state open \
+            --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "::notice::Commented on the existing nightly failure issue #$existing."
+          else
+            gh issue create --repo "$REPO" \
+              --title "Nightly CI failed on master" \
+              --label ci-nightly \
+              --body "$body"
+          fi
