@@ -192,6 +192,14 @@ The trigger comes from the workflow file at the ref being run, so a tag cut befo
 trigger existed cannot be dispatched; run the commit as a branch, or cut a fresh tag from a
 commit that contains it.
 
+Pushing a tag also publishes the GitHub release. `.github/workflows/release.yml` re-checks
+that the tagged commit is green, then reads that version's `CHANGELOG.md` section and uses
+it as the release notes, titled `0.6.3 — release identification`. A tag with no changelog
+entry fails instead of publishing an empty release, and a tag whose release already exists
+is left alone so notes edited on GitHub (checksums, artifact details) survive a re-push.
+No artifact is attached: the APK is signed with a key that stays off CI, so it is uploaded
+by hand after `apksigner verify`.
+
 The same suite also runs **nightly at 03:17 UTC against `master`**, because some failures
 arrive without a push: a dependency's new release, a test that only fails on a particular
 date, or a fixture that aged out. Scheduled runs always use the default branch's copy of the
