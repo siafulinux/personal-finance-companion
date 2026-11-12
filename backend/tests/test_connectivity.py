@@ -216,7 +216,9 @@ def test_failed_sync_is_recorded_and_backed_off(db, user, monkeypatch):
     link, _, _ = _connect(db, user)
     adapter = get_adapter("sandbox")
 
-    def boom(access_token, cursor, count=100):
+    # The signature mirrors the adapter interface, including the caller's local
+    # date, so the stub cannot drift from what sync_link actually passes.
+    def boom(access_token, cursor, count=100, *, today=None):
         raise ProviderError("Provider is down.", code="provider_unavailable", retryable=True)
 
     # sync builds its adapter from the saved provider configuration now, so the
@@ -255,7 +257,7 @@ def test_reauth_required_stops_retrying(db, user, monkeypatch):
     link, _, _ = _connect(db, user)
     adapter = get_adapter("sandbox")
 
-    def needs_login(access_token, cursor, count=100):
+    def needs_login(access_token, cursor, count=100, *, today=None):
         raise ProviderError(
             "Reconnect the institution.", code="ITEM_LOGIN_REQUIRED", requires_reauth=True
         )

@@ -156,9 +156,22 @@ class ProviderAdapter(ABC):
 
     @abstractmethod
     def sync_page(
-        self, access_token: str, cursor: str | None, count: int = 100
+        self,
+        access_token: str,
+        cursor: str | None,
+        count: int = 100,
+        *,
+        today: date | None = None,
     ) -> TransactionDelta:
-        """One page of incremental changes. ``cursor=None`` means "from the beginning"."""
+        """One page of incremental changes. ``cursor=None`` means "from the beginning".
+
+        ``today`` is the *user's* local date, not the server's. An adapter that
+        describes recent activity has to date it from the day the user is living in:
+        a server clock in a timezone ahead of theirs (a UTC container, an evening in
+        the Americas) would otherwise stamp rows into the user's future, where every
+        "today"-relative query drops them. Adapters driven by a provider cursor
+        ignore it.
+        """
 
     @abstractmethod
     def remove_item(self, access_token: str) -> None:

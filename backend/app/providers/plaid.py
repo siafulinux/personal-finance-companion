@@ -341,8 +341,16 @@ class PlaidProvider(ProviderAdapter):
         return accounts
 
     def sync_page(
-        self, access_token: str, cursor: str | None, count: int = 100
+        self,
+        access_token: str,
+        cursor: str | None,
+        count: int = 100,
+        *,
+        today: date | None = None,
     ) -> TransactionDelta:
+        # Plaid dates the rows itself and resumes from its own cursor, so the
+        # caller's local date is accepted for interface parity and unused.
+        del today
         payload: dict[str, object] = {"access_token": access_token, "count": count}
         if cursor:
             payload["cursor"] = cursor
