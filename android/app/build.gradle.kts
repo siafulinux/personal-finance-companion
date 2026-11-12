@@ -85,8 +85,11 @@ android {
         // 0.6.0: Phase 4 — loans and advances, savings goals, unified obligations,
         // the Safe-to-Spend breakdown, merchant insights and location-aware
         // Shopping Intelligence.
-        versionCode = 11
-        versionName = "0.6.5"
+        // 0.6.2: no new feature. The manifest still said 0.6.0 while the server had
+        // moved on, so an installed APK could not be told apart from the first
+        // 0.6.0 build. The version is the change.
+        versionCode = 9
+        versionName = "0.6.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.

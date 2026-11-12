@@ -8,6 +8,58 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.2] — 2026-11-11 — release plumbing and the walkthrough defects
+
+Two threads: making a release something the repository verifies rather than something a human
+remembers to check, and clearing what the Phase 4 walkthroughs turned up. No version number in
+the API changes — this is plumbing and repairs. The Android manifest was still `0.6.0`, which
+is fixed here.
+
+### Added
+
+- **Teller live-verification harness** (`backend/scripts/verify_teller_live.py`): links an
+  institution, syncs it and disconnects against the real API step by step, and refuses to
+  report success for any step it could not run. Its fail-closed paths — missing configuration,
+  a non-sandbox environment, an unreachable provider — have unit tests of their own.
+- **Nightly CI** at 03:17 UTC against the default branch. Some breakage needs no push: a
+  dependency publishing a breaking release, a test that only fails on one calendar date, a
+  fixture that aged out. The schedule surfaces those overnight instead of during a release.
+- **Android build-time address check** in CI: the app is assembled with `-PpfcApiBaseUrl` and
+  the APK's dex is searched for the value, so a broken override fails the step rather than
+  shipping an APK that still points at the emulator.
+- **Plan tab** in Android, indexing Loans, Savings and Obligations. They were reachable only
+  from a card low on the dashboard, which meant scrolling past the summary to find them and no
+  route back once that card changed.
+
+### Fixed
+
+- **Deleting an account that has budgets** no longer deletes the budgets and their allocations
+  twice. The backend suite now treats `SAWarning` as an error, so an "expected to delete N
+  row(s); 0 were matched" cannot pass unnoticed a second time.
+- **Insight empty states** no longer say a merchant's pattern is too weak while listing
+  high-confidence findings above them; the message follows the history that actually exists.
+- **Loan action row** flows to a second line instead of breaking a label mid-word
+  ("Remov" / "e") when the three buttons do not fit on a narrow screen.
+- **Android server address** can be baked in at build time with `-PpfcApiBaseUrl`, instead of
+  the emulator loopback being the only default, and it is validated before it reaches the app.
+
+### Changed
+
+- PostgreSQL is published on `127.0.0.1:${PFC_DB_PORT:-5433}` for host-side diagnostics. It
+  stays loopback-only, and `docs/remote-access.md` no longer claims no host port exists.
+- **The Android manifest reports `0.6.2` / versionCode 9.** It had said `0.6.0` since the Phase 4
+  build, so an installed APK could not be told apart from the first `0.6.0` one while the server
+  had already moved on. There is no new app behaviour — the version is the change — and it is what
+  the signed APK attached to this release was built from.
+
+### Notes
+
+- This section heads the changelog because the tag was re-cut on 2026-11-12. `v0.6.2` pointed
+  at a tree whose manifest said `0.6.4`, so the tag, the manifest and these notes disagreed;
+  `0.6.3`–`0.6.5` were released from `master` in between and keep their sections below.
+
+---
+
 ## [0.6.5] — 2026-11-12 — CI answers the merge queue
 
 The four required checks could not describe a queued entry. A merge queue builds a
@@ -104,47 +156,6 @@ release tag, which is what this entry is.
 - Producing this release moved the deployed images to `pfc-api:0.6.1` / `pfc-web:0.6.1`; the
   images now carry `org.opencontainers.image.ref.name` and `.revision` labels, which earlier
   builds claimed in `.env` but did not have.
-
----
-
-## [0.6.2] — 2026-11-11 — release plumbing and the walkthrough defects
-
-Two threads: making a release something the repository verifies rather than something a human
-remembers to check, and clearing what the Phase 4 walkthroughs turned up. No version number in
-the API or the Android manifest changes — this is plumbing and repairs.
-
-### Added
-
-- **Teller live-verification harness** (`backend/scripts/verify_teller_live.py`): links an
-  institution, syncs it and disconnects against the real API step by step, and refuses to
-  report success for any step it could not run. Its fail-closed paths — missing configuration,
-  a non-sandbox environment, an unreachable provider — have unit tests of their own.
-- **Nightly CI** at 03:17 UTC against the default branch. Some breakage needs no push: a
-  dependency publishing a breaking release, a test that only fails on one calendar date, a
-  fixture that aged out. The schedule surfaces those overnight instead of during a release.
-- **Android build-time address check** in CI: the app is assembled with `-PpfcApiBaseUrl` and
-  the APK's dex is searched for the value, so a broken override fails the step rather than
-  shipping an APK that still points at the emulator.
-- **Plan tab** in Android, indexing Loans, Savings and Obligations. They were reachable only
-  from a card low on the dashboard, which meant scrolling past the summary to find them and no
-  route back once that card changed.
-
-### Fixed
-
-- **Deleting an account that has budgets** no longer deletes the budgets and their allocations
-  twice. The backend suite now treats `SAWarning` as an error, so an "expected to delete N
-  row(s); 0 were matched" cannot pass unnoticed a second time.
-- **Insight empty states** no longer say a merchant's pattern is too weak while listing
-  high-confidence findings above them; the message follows the history that actually exists.
-- **Loan action row** flows to a second line instead of breaking a label mid-word
-  ("Remov" / "e") when the three buttons do not fit on a narrow screen.
-- **Android server address** can be baked in at build time with `-PpfcApiBaseUrl`, instead of
-  the emulator loopback being the only default, and it is validated before it reaches the app.
-
-### Changed
-
-- PostgreSQL is published on `127.0.0.1:${PFC_DB_PORT:-5433}` for host-side diagnostics. It
-  stays loopback-only, and `docs/remote-access.md` no longer claims no host port exists.
 
 ---
 
