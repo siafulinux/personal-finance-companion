@@ -8,6 +8,31 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.0.1] — 2026-11-12 — a 0.6.0 that still works today
+
+A patch on the `0.6.0` maintenance line, carrying two fixes that 0.6.0 has needed since it
+shipped. No new features: 0.6.0's release page stays as it is, and anyone installing the old
+release today gets a build that connects.
+
+### Fixed
+
+- **Provider sync dates from the user's local today**, not the server's. A container in UTC
+  while the user is in the Americas dated sandbox and Teller rows a day into their future,
+  where "up to today" queries dropped them: sync reported `partial`, removals vanished and
+  merchant history came back empty.
+- **The sandbox's monthly fixtures stay detectable on any run date.** A fixed 90-day window
+  could hold only two Netflix occurrences, so recurring detection found nothing and the
+  suite failed on the calendar rather than on a change.
+
+### Notes
+
+- Backports only, on `release/0.6.0-maint`. `master` already carries both fixes, and the
+  features, schema and API of 0.6.0 are unchanged.
+- `versionCode` moves 8 → 9 so this installs over 0.6.0 rather than being treated as a
+  downgrade.
+
+---
+
 ## [0.6.0] — 2026-11-10 — Phase 4 financial intelligence
 
 The finance engine now sees the whole picture: what is borrowed, what is set aside, what is

@@ -28,8 +28,11 @@ android {
         // 0.6.0: Phase 4 — loans and advances, savings goals, unified obligations,
         // the Safe-to-Spend breakdown, merchant insights and location-aware
         // Shopping Intelligence.
-        versionCode = 8
-        versionName = "0.6.0"
+        // 0.6.0.1: a patch on the 0.6.0 maintenance line -- the sync/fixture date
+        // fixes only, not a new feature. versionCode still increases so an install
+        // upgrades in place instead of being refused as a downgrade.
+        versionCode = 9
+        versionName = "0.6.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 10.0.2.2 is the host machine as seen from the Android emulator. Traffic
