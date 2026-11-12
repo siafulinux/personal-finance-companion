@@ -17,7 +17,9 @@ from app.providers.registry import get_adapter
 from app.providers.sandbox import advance, reset_state
 from app.security.secrets import decrypt_text
 from app.services import sync as sync_module
+from app.services.balances import account_balance
 from app.services.sync import (
+    _signed_provider_balance,
     connect_institution,
     disconnect_link,
     due_links,
@@ -81,6 +83,18 @@ def test_sandbox_subscriptions_stay_detectable_on_any_date(today):
         assert max(dates) <= today
         assert (today - min(dates)).days <= 95, f"{merchant} reaches back to {min(dates)}"
 
+    # The card must read as a liability on every date. Its *opening* balance is
+    # rebased from this history and can legitimately flip into credit (spend less
+    # than the payments in the window), so the invariant lives on the signed
+    # provider balance that every sync reconciles to.
+    from app.providers.sandbox import CREDIT
+
+    card = next(
+        row for row in get_adapter("sandbox").list_accounts("sbx-access-x")
+        if row.external_id == CREDIT
+    )
+    assert _signed_provider_balance(card) < D("0")
+
 
 def test_sandbox_dates_from_its_institution_zone_not_the_host_clock():
     """The simulated institution has a timezone, so the host's must not matter.
@@ -126,10 +140,15 @@ def test_connect_imports_accounts_and_encrypts_token(db, user):
     types = {a.account_type for a in accounts}
     assert types == {"checking", "savings", "credit_card"}
 
-    # Credit cards are liabilities: stored negative, and never spendable cash.
+    # Credit cards are liabilities: never spendable cash, and the balance the app
+    # shows is negative. Assert the derived balance rather than the opening one:
+    # opening is rebased from the sandbox's date-dependent history, so its sign
+    # says nothing about the card (a card paid off inside the window opens in
+    # credit), while posted_balance always reconciles to the provider's figure.
     card = next(a for a in accounts if a.account_type == "credit_card")
     assert card.include_in_safe_to_spend is False
-    assert card.opening_balance <= D("0")
+    summary = account_balance(db, user.id, card.id)
+    assert summary is not None and summary.posted_balance < D("0")
 
     assert run.status == "success"
     assert run.added > 50

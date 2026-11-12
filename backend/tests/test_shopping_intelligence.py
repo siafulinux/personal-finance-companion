@@ -26,7 +26,7 @@ from app.services.merchant_intelligence import (
 )
 from app.services.recommendations import build_recommendations, store_guidance
 from app.services.users import register_user
-from app.utils.dates import today_in, utc_now
+from app.utils.dates import add_months, today_in, utc_now
 from tests.conftest import make_transaction
 
 HOME = (Decimal("30.451500"), Decimal("-91.187100"))
@@ -299,14 +299,24 @@ def test_budget_pressure_uses_the_real_budget(db, user, account, prefs):
     )
     # Enough months of history to clear the evidence floor, with the current
     # month already over its 50.00 allocation.
-    # Spread over three calendar months: the history floor counts distinct months,
-    # so clustering the older purchases in one month would not clear it.
-    # All within the 90-day window so the distinct-month count is measured on the
-    # same purchases the merchant profile reports.
-    for days_ago in (85, 60, 40, 6, 5, 4, 3, 2):
+    # Anchored to calendar months rather than "N days ago": the finding needs
+    # spend in the current month, and day offsets land entirely in the previous
+    # month when the suite runs on the 1st or 2nd. Three purchases today (all on
+    # the 1st at worst, so still this month) plus one in each of the two
+    # preceding months clears the three-month floor, and the oldest is at most
+    # ~77 days back, inside the 90-day window the profile reads.
+    month_start = today.replace(day=1)
+    dates = [
+        today,
+        max(month_start, today - timedelta(days=1)),
+        max(month_start, today - timedelta(days=2)),
+        add_months(month_start, -1) + timedelta(days=14),
+        add_months(month_start, -2) + timedelta(days=14),
+    ]
+    for when in dates:
         make_transaction(
             db, user, account, amount="40.00", merchant="Kroger", description="KROGER",
-            txn_date=today - timedelta(days=days_ago), category_id=groceries.id,
+            txn_date=when, category_id=groceries.id,
         )
     db.commit()
 

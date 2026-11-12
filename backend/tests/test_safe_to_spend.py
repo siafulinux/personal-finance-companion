@@ -322,7 +322,10 @@ def test_integration_scenario_a(db, user, prefs, account, today):
 
 
 def test_paid_bill_no_longer_reserved(db, user, prefs, account, today):
-    prefs.safe_to_spend_horizon_days = 30
+    # 20 days, not 30: a 30-day horizon starting late in a 31-day month reaches
+    # past the next monthly occurrence, so the bill would be reserved twice and
+    # this would fail on the calendar rather than on the behaviour under test.
+    prefs.safe_to_spend_horizon_days = 20
     db.commit()
     bill = create_bill_service(
         db,
@@ -346,7 +349,8 @@ def test_paid_bill_no_longer_reserved(db, user, prefs, account, today):
 
 
 def test_bill_already_covered_by_payment_is_not_reserved(db, user, prefs, account, today):
-    prefs.safe_to_spend_horizon_days = 30
+    # Tight horizon for the same reason as above: one monthly occurrence only.
+    prefs.safe_to_spend_horizon_days = 20
     db.commit()
     bill = create_bill_service(
         db,

@@ -218,8 +218,13 @@ def test_scenario_d_auto_match_marks_bill_paid(db, user, prefs, account, today):
     db.commit()
     assert info is not None and info["outcome"] == "auto"
 
+    # By due date, not "the first row": materialisation creates a year of
+    # occurrences and an unordered first row is whichever the planner returned.
     occurrence = db.scalar(
-        select(BillOccurrence).where(BillOccurrence.bill_id == bill.id)
+        select(BillOccurrence).where(
+            BillOccurrence.bill_id == bill.id,
+            BillOccurrence.due_date == today + timedelta(days=2),
+        )
     )
     db.refresh(occurrence)
     assert occurrence.status == OccurrenceStatus.PAID.value
