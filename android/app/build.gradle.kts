@@ -1,8 +1,52 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+/**
+ * Release signing material, which deliberately lives outside this repository.
+ *
+ * The path and passwords come from a properties file — by default
+ * `~/.pfc/release.properties`, or wherever `PFC_KEYSTORE_PROPERTIES` points —
+ * holding `storeFile`, `storePassword`, `keyAlias` and `keyPassword`. The same
+ * four values are also accepted from the environment as `PFC_KEYSTORE_FILE`,
+ * `PFC_KEYSTORE_PASSWORD`, `PFC_KEY_ALIAS` and `PFC_KEY_PASSWORD`, so a CI job
+ * can sign from masked secrets without a file on disk.
+ *
+ * No key means an unsigned release build rather than a failed one: a contributor
+ * or a debug loop must not need the release key to compile. A published artifact
+ * is checked with `apksigner verify` before it is uploaded, so an unsigned build
+ * cannot reach a release by accident.
+ *
+ * Backported from `master` so a build cut on this maintenance line signs itself
+ * rather than being signed by hand with `apksigner` after the fact.
+ */
+val releaseSigning: Map<String, String> = run {
+    val properties = Properties()
+    val path = System.getenv("PFC_KEYSTORE_PROPERTIES")
+        ?: (System.getProperty("user.home") + "/.pfc/release.properties")
+    val file = File(path)
+    if (file.isFile) file.inputStream().use { properties.load(it) }
+
+    fun value(env: String, key: String): String? =
+        System.getenv(env) ?: properties.getProperty(key)
+
+    val storeFile = value("PFC_KEYSTORE_FILE", "storeFile")
+    if (storeFile == null) {
+        emptyMap()
+    } else {
+        mapOf(
+            "storeFile" to storeFile,
+            "storePassword" to (value("PFC_KEYSTORE_PASSWORD", "storePassword") ?: ""),
+            "keyAlias" to (value("PFC_KEY_ALIAS", "keyAlias") ?: ""),
+            "keyPassword" to (value("PFC_KEY_PASSWORD", "keyPassword") ?: ""),
+        )
+    }
 }
 
 android {
@@ -48,10 +92,23 @@ android {
         buildConfigField("int", "CLIENT_API_VERSION", "1")
     }
 
+    signingConfigs {
+        if (releaseSigning.isNotEmpty()) {
+            create("release") {
+                storeFile = File(releaseSigning.getValue("storeFile"))
+                storePassword = releaseSigning.getValue("storePassword")
+                keyAlias = releaseSigning.getValue("keyAlias")
+                keyPassword = releaseSigning.getValue("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Present only when a key was found; see releaseSigning above.
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
