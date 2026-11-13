@@ -346,7 +346,12 @@ def list_visits(db: Session, user: User, *, days: int = 90, limit: int = 200) ->
 
 
 def _suppressed_reason(
-    db: Session, user: User, prefs: NotificationPreference, visited_at: datetime
+    db: Session,
+    user: User,
+    prefs: NotificationPreference,
+    visited_at: datetime,
+    *,
+    visit_id: uuid.UUID,
 ) -> str | None:
     if prefs.location_paused_until and prefs.location_paused_until > utc_now():
         return "Shopping Intelligence is paused."
@@ -359,7 +364,13 @@ def _suppressed_reason(
         select(func.count(ShoppingVisit.id)).where(
             ShoppingVisit.user_id == user.id,
             ShoppingVisit.visited_at > cooldown_start,
-            ShoppingVisit.visited_at < visited_at,
+            ShoppingVisit.visited_at <= visited_at,
+            # The visit being decided is already flushed, so it is one of the rows this
+            # counts. It is excluded by id, not by time: two detections can carry the
+            # same instant (a retry, or two places seen within the same second), and
+            # `< visited_at` dropped both of those, announcing the second place inside
+            # the window the first had just opened.
+            ShoppingVisit.id != visit_id,
         )
     )
     if recent:
@@ -499,7 +510,7 @@ def detect_visit(
             "notify": False,
         }
 
-    suppress = _suppressed_reason(db, user, prefs, visited_at)
+    suppress = _suppressed_reason(db, user, prefs, visited_at, visit_id=visit.id)
     if tracked is not None and not tracked.notify_enabled:
         suppress = "Notifications are off for this location."
 
@@ -618,7 +629,7 @@ def record_arrival(db: Session, user: User, location_id: uuid.UUID) -> dict[str,
             "notify": False,
         }
 
-    suppress = _suppressed_reason(db, user, prefs, now)
+    suppress = _suppressed_reason(db, user, prefs, now, visit_id=visit.id)
     if not location.notify_enabled:
         suppress = "Notifications are off for this location."
     guidance = store_guidance(

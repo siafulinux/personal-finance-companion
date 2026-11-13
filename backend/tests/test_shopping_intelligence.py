@@ -115,6 +115,26 @@ def test_cooldown_suppresses_a_second_notification(db, user, account, prefs):
     assert second["prompt"]["suppress_reason"]
 
 
+def test_two_visits_at_the_same_instant_still_suppress_the_second(db, user, account, prefs):
+    """The cooldown is about the pair of visits, not about their order.
+
+    Two detections can carry an identical `visited_at` -- a retried request, or two
+    places seen inside the same second. The row under decision is excluded by id, so
+    `<= visited_at` still sees the other one; excluding by time instead dropped both
+    and announced the second place inside the window the first had just opened.
+    """
+    _enable(db, user, notification_cooldown_minutes=120)
+    moment = utc_now().replace(microsecond=0)
+
+    first = _detect(db, user, business_name="Target", visited_at=moment)
+    assert first["notify"] is True
+
+    second = _detect(db, user, business_name="Kroger", visited_at=moment)
+    assert second["recorded"] is True
+    assert second["notify"] is False
+    assert "another place recently" in (second["prompt"]["suppress_reason"] or "")
+
+
 def test_quiet_hours_suppress_the_notification_but_keep_the_history(db, user, account, prefs):
     _enable(db, user, quiet_hours_start="00:00", quiet_hours_end="23:59", quiet_hours_timezone="UTC")
     result = _detect(db, user, business_name="Target")
