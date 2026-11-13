@@ -53,6 +53,7 @@ from app.providers.base import (
     TransactionDelta,
 )
 from app.security.link_nonce import verify_nonce
+from app.utils.dates import today_in
 from app.utils.money import quantize
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,17 @@ DEFAULT_BASE_URL = "https://api.teller.io"
 OVERLAP_DAYS = 10
 #: How much history a first sync asks for.
 INITIAL_HISTORY_DAYS = 90
+
+# Teller serves US institutions only, so an institution's calendar is American. This is a
+# fallback for calls that arrive without a user's date -- the sync engine always passes
+# the user's own today -- and exists so no path here reads the host's clock. A container
+# in UTC would otherwise count the window from a day its user has not reached yet.
+INSTITUTION_TIMEZONE = "America/New_York"
+
+
+def institution_today() -> date:
+    """Today on the institution's calendar, independent of the container clock."""
+    return today_in(INSTITUTION_TIMEZONE)
 #: Products this application needs. Both must be supported by the institution.
 REQUIRED_PRODUCTS = ("balance", "transactions")
 
@@ -350,7 +362,9 @@ class TellerProvider(ProviderAdapter):
 
         ``today`` is the user's local date: the history window is counted back from the
         day they are living in, not from this host's clock, which may already be on
-        tomorrow and would date the opening balance into their future.
+        tomorrow and would date the opening balance into their future. A call without
+        one falls back to the institution's calendar rather than the host's, so no path
+        through this adapter can date a window from wherever the container happens to run.
         """
         if not public_token:
             raise ProviderError(
@@ -407,7 +421,7 @@ class TellerProvider(ProviderAdapter):
             external_item_id=enrollment_id or str(payload.get("external_item_id") or ""),
             institution_name=str(institution_name or "Connected institution")[:160],
             institution_id=str(institution_id) if institution_id else None,
-            history_start=(today or date.today()) - timedelta(days=INITIAL_HISTORY_DAYS),
+            history_start=(today or institution_today()) - timedelta(days=INITIAL_HISTORY_DAYS),
         )
 
     def _verify_signature(
@@ -541,9 +555,10 @@ class TellerProvider(ProviderAdapter):
         pending row whose posted form arrives under the same id.
 
         The window ends on the user's local date rather than the server's, so a server
-        running ahead of them does not ask for tomorrow's activity.
+        running ahead of them does not ask for tomorrow's activity. Without a user date
+        it ends on the institution's calendar, never on the host's clock.
         """
-        today = today or date.today()
+        today = today or institution_today()
         start = today - timedelta(days=INITIAL_HISTORY_DAYS)
         if cursor and cursor.startswith(_CURSOR_PREFIX):
             try:
@@ -699,7 +714,9 @@ class TellerProvider(ProviderAdapter):
 __all__ = [
     "DEFAULT_BASE_URL",
     "INITIAL_HISTORY_DAYS",
+    "INSTITUTION_TIMEZONE",
     "OVERLAP_DAYS",
     "REQUIRED_PRODUCTS",
     "TellerProvider",
+    "institution_today",
 ]
