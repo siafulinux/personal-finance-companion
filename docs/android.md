@@ -154,6 +154,25 @@ fine, and a `JAVA_HOME` pointed at another version does not override the pin. Th
 machine still needs a JDK 17 installed (`apt install openjdk-17-jdk`); to change the pin later,
 regenerate the file with `./gradlew updateDaemonJvm --jvm-version=17`.
 
+### Release builds sign themselves
+
+The release key is never in the repository. `android/app/build.gradle.kts` reads it from a
+properties file — `~/.pfc/release.properties` by default, or `PFC_KEYSTORE_PROPERTIES` —
+holding `storeFile`, `storePassword`, `keyAlias` and `keyPassword`; the same four are
+accepted from `PFC_KEYSTORE_FILE`, `PFC_KEYSTORE_PASSWORD`, `PFC_KEY_ALIAS` and
+`PFC_KEY_PASSWORD`.
+
+```bash
+./gradlew :app:assembleRelease         # APK: app/build/outputs/apk/release/app-release.apk
+/usr/lib/android-sdk/build-tools/36.0.0/apksigner verify --print-certs \
+  app/build/outputs/apk/release/app-release.apk
+```
+
+With no key present the build still succeeds, just unsigned as
+`app-release-unsigned.apk`, so a contributor never needs the release key to compile.
+Backported from `master`, where signing config landed after 0.6.2 had already shipped and
+its APK was signed by hand with `apksigner`.
+
 ## Installing on a physical device
 
 The APK is not tied to the emulator or to this machine. Version `0.3.2` (`versionCode` 5) is
