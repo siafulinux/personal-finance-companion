@@ -33,9 +33,7 @@ on:
   merge_group:
   workflow_dispatch:
   schedule:
-    # TEMPORARY: lowered to every five minutes to watch the nightly alert's
-    # close step fire on a real scheduled run. Restore 17 3 * * * afterwards.
-    - cron: "*/5 * * * *"
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
