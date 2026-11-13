@@ -168,6 +168,14 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+      - name: Check the tag gate's own regression suite
+        # The gate decides whether a commit may be tagged, so a silent change to
+        # `scripts/verify-ci` lets a red commit be released -- the one failure the
+        # gate exists to prevent. Its cases use a fake `gh` and canned payloads,
+        # so they need no credentials and no database, and they run before the
+        # install: a regression here fails in seconds rather than after a venv.
+        working-directory: .
+        run: ./scripts/verify-ci-test
       - name: Install into backend/.venv
         working-directory: backend
         # The fixtures invoke `backend/.venv/bin/alembic` by path, so the virtualenv
