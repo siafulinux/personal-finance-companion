@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import time
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -193,6 +195,44 @@ def test_transactions_map_sign_status_and_category():
     assert delta.has_more is False
 
 
+def test_institution_today_ignores_the_host_clock():
+    """The fallback calendar is the institution's, so the container's zone cannot change it.
+
+    Reading `date.today()` made the window depend on where the process ran: a UTC
+    image and a laptop in the Americas disagreed about the day, and the window could
+    end on a date the user had not reached. Flipping `TZ` across the date line is the
+    cheapest way to prove the answer no longer comes from here.
+    """
+    from app.providers.teller import INSTITUTION_TIMEZONE, institution_today
+    from app.utils.dates import today_in
+
+    expected = today_in(INSTITUTION_TIMEZONE)
+    original = os.environ.get("TZ")
+    try:
+        for zone in ("Pacific/Kiritimati", "Pacific/Midway"):
+            os.environ["TZ"] = zone
+            time.tzset()
+            assert institution_today() == expected
+    finally:
+        if original is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = original
+        time.tzset()
+
+
+def test_complete_link_counts_the_history_window_from_the_institutions_day():
+    """Without a user date, the window is still not the host's."""
+    from app.providers.teller import INITIAL_HISTORY_DAYS, institution_today
+
+    result = _provider(_complete_handler).complete_link(
+        "token_sandbox",
+        {"nonce": issue_nonce("user-9"), "user_id": "usr_1", "enrollment_id": "enr_9"},
+    )
+
+    assert result.history_start == institution_today() - timedelta(days=INITIAL_HISTORY_DAYS)
+
+
 def test_sync_reads_an_overlapping_window_and_advances_its_cursor():
     requests: list[httpx.Request] = []
 
@@ -204,7 +244,11 @@ def test_sync_reads_an_overlapping_window_and_advances_its_cursor():
             return httpx.Response(200, json={"ledger": "10.00"})
         return httpx.Response(200, json=[])
 
-    today = date.today()
+    # No `today` is passed, so this also pins the fallback: the window must end on the
+    # institution's calendar rather than on whatever date this host is living in.
+    from app.providers.teller import institution_today
+
+    today = institution_today()
     cursor = f"teller:v1:{(today - timedelta(days=30)).isoformat()}"
     delta = _provider(handler).sync_page("token_abc", cursor=cursor)
     transaction_requests = [r for r in requests if r.url.path.endswith("/transactions")]

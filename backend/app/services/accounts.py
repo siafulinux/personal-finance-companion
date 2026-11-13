@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -65,13 +66,26 @@ def account_payload(account: FinancialAccount, summary: BalanceSummary | None) -
     }
 
 
-def create_account(db: Session, user_id: uuid.UUID, payload: AccountCreate) -> FinancialAccount:
+def create_account(
+    db: Session, user_id: uuid.UUID, payload: AccountCreate, *, today: date
+) -> FinancialAccount:
+    """Open a manually tracked account.
+
+    ``today`` is the *user's* local date, not this host's. It dates an account the
+    caller did not date itself, which is what keeps a UTC container from opening it
+    on tomorrow's date for a user in the Americas -- an opening balance in their
+    future, where every "up to today" balance and forecast read leaves it out.
+
+    An explicit ``opening_balance_date`` wins: back-dating an account to when it was
+    really opened is a normal thing to want, and the server has no way to improve on
+    a date the user chose.
+    """
     account = FinancialAccount(
         user_id=user_id,
         name=payload.name.strip(),
         account_type=payload.account_type.value,
         opening_balance=quantize(payload.opening_balance),
-        opening_balance_date=payload.opening_balance_date,
+        opening_balance_date=payload.opening_balance_date or today,
         currency=payload.currency,
         include_in_safe_to_spend=payload.include_in_safe_to_spend,
         credit_limit=quantize(payload.credit_limit) if payload.credit_limit is not None else None,
