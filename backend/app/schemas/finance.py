@@ -22,7 +22,11 @@ class AccountCreate(APIModel):
     name: str = Field(min_length=1, max_length=120)
     account_type: AccountType
     opening_balance: Money = Decimal("0")
-    opening_balance_date: date
+    # Optional on purpose: a client that omits it gets the *user's* local today from
+    # the server, so a device whose clock is wrong (or in another timezone) cannot
+    # date the opening balance into the user's future. An explicit value is kept as
+    # given, because back-dating an account is a legitimate thing to do.
+    opening_balance_date: date | None = None
     currency: str = Field(default="USD", min_length=3, max_length=3)
     include_in_safe_to_spend: bool = True
     credit_limit: Money | None = Field(default=None, ge=0)

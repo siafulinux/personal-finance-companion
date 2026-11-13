@@ -31,6 +31,7 @@ from app.services.accounts import (
     update_account,
 )
 from app.services.balances import account_balance
+from app.utils.dates import today_in
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -57,7 +58,9 @@ def post_account(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AccountOut:
-    account = create_account(db, user.id, payload)
+    # The user's calendar, not the server's: an account whose opening balance is
+    # dated tomorrow contributes nothing to today's balance or forecast.
+    account = create_account(db, user.id, payload, today=today_in(user.timezone))
     summary = account_balance(db, user.id, account.id)
     return AccountOut(**account_payload(account, summary))
 
