@@ -8,6 +8,48 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.7] — 2026-11-13 — releases that check themselves, and two date bugs
+
+Everything here was already on `master` while the manifest still named 0.6.6, which is why
+this release exists at all: the tag gate now allows a manifest ahead of the tag, so a build
+can name what it contains without waiting for the next numbered release.
+
+### Added
+
+- **`scripts/verify-apk`** checks a downloaded APK against the release that published it:
+  its SHA-256 must equal a digest in one of that release's `.sha256` sidecars, and its
+  signing certificate must be the project's release signer, pinned in the script. A sidecar
+  is matched by digest rather than by file name, so a renamed download still verifies, and a
+  release with no sidecar is rejected. Exit status separates `0` verified from `1` not
+  verified and `2` could not verify — a file nobody could check is not a file that checked
+  out.
+- **`scripts/verify-ci` has a regression suite, run in the backend CI job**, so a change to
+  the tag gate fails the build instead of waiting for a human to notice a release slipped
+  through.
+
+### Fixed
+
+- **Two visits recorded at the same instant no longer double-notify.** The cooldown query
+  compared against a strictly earlier visit, so a second detection in the same second was
+  not suppressed.
+- **The last server-clock reads are gone.** `complete_link`'s history window and manual
+  account opening dates now come from the user's local day, so a container in UTC no longer
+  dates a user's rows into their future.
+- **A release whose notes drift from its changelog fails CI.** `scripts/verify-releases`
+  runs in the web job, so notes edited on GitHub and entries rewritten here cannot diverge
+  unnoticed.
+
+### Changed
+
+- **Release builds sign themselves.** `android/app/build.gradle.kts` reads the release key
+  from `~/.pfc/release.properties` (or `PFC_KEYSTORE_*`), so `assembleRelease` produces a
+  signed APK instead of requiring `apksigner` by hand; a missing key still yields an
+  unsigned build rather than a failure.
+- **The manifest now names `0.6.7` / `versionCode` 12.** The published 0.6.2 build holds 9
+  and the 0.6.0.1 maintenance build holds 11, so 12 keeps every install path unambiguous.
+
+---
+
 ## [0.6.6] — 2026-11-12 — a suite that checks the calendar and the documents
 
 The last few releases taught the repository to verify its own releases. This one closes the

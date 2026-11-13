@@ -135,8 +135,12 @@ android {
         // The manifest had been left at 0.6.2 / 9 while 0.6.3-0.6.5 shipped, so no
         // tag since could be verified. versionCode 10 is the next one after the
         // published 0.6.2 build (9); no release ever used 10.
-        versionCode = 10
-        versionName = "0.6.6"
+        // 0.6.7: the tag gate allows a manifest ahead of the tag, so this names the
+        // build rather than waiting for the next release. 12 is the next free code:
+        // 11 belongs to the 0.6.0.1 maintenance build, and reusing it would put two
+        // different APKs at one number.
+        versionCode = 12
+        versionName = "0.6.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
