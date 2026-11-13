@@ -28,8 +28,11 @@ release today gets a build that connects.
 
 - Backports only, on `release/0.6.0-maint`. `master` already carries both fixes, and the
   features, schema and API of 0.6.0 are unchanged.
-- `versionCode` moves 8 → 9 so this installs over 0.6.0 rather than being treated as a
-  downgrade.
+- `versionCode` moves to 11: this installs over 0.6.0 rather than being treated as a
+  downgrade, and over 0.6.2 as well. 0.6.2 shipped `versionCode` 9, so the first cut of
+  this patch, also numbered 9, was refused on a device carrying 0.6.2 -- the very upgrade
+  path it exists for. 10 belongs to 0.6.6 on `master`, so 11 is the next free number and
+  the maintenance line no longer collides with any published release.
 
 ---
 

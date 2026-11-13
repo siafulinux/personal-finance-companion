@@ -30,8 +30,12 @@ android {
         // Shopping Intelligence.
         // 0.6.0.1: a patch on the 0.6.0 maintenance line -- the sync/fixture date
         // fixes only, not a new feature. versionCode still increases so an install
-        // upgrades in place instead of being refused as a downgrade.
-        versionCode = 9
+        // upgrades in place instead of being refused as a downgrade, and it skips
+        // past 0.6.2's 9: a maintenance build that shares a versionCode with a
+        // newer release is refused as a downgrade on a device carrying that
+        // release, which is exactly the device this patch is meant to rescue.
+        // 11 is free because 0.6.6 on master holds 10.
+        versionCode = 11
         versionName = "0.6.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
