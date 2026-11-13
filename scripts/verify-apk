@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Verify a downloaded APK against the release that published it.
+#
+#   scripts/verify-apk ~/Downloads/personal-finance-companion-0.6.2.apk v0.6.0
+#   scripts/verify-apk personal-finance-companion-0.6.0.apk          # newest release
+#
+# Two checks, both fail-closed, because either alone proves too little:
+#
+#   1. SHA-256 -- the file must equal a digest in one of the release's `.sha256`
+#      sidecars, so a truncated or altered download is caught. The sidecar is
+#      matched by digest, not by file name: a renamed download still verifies,
+#      and a digest that matches nothing is a failure rather than a warning.
+#
+#   2. Signature -- the signing certificate must be the project's release signer.
+#      A matching checksum only proves the file arrived intact from wherever it
+#      came; the certificate is what proves this repository built it.
+#
+# The expected signer is pinned below and can be overridden with
+# PFC_SIGNER_SHA256 for a fork or a rebuilt key. A pin that silently accepted
+# whatever signed the file would make this second check pointless.
+#
+# Exit codes: 0 verified, 1 not verified, 2 cannot verify (no gh/apksigner/auth).
+set -euo pipefail
+
+# SHA-256 of the release signing certificate (not of the APK).
+# Read with: apksigner verify --print-certs <apk>
+DEFAULT_SIGNER_SHA256=c2c7769f3c6ace9869b8a04e288f874c54e411c17fd06d93114e8198a45d5566
+
+usage() {
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+fail() {
+  printf 'verify-apk: %s\n' "$*" >&2
+  exit 2
+}
+
+reject() {
+  printf 'verify-apk: %s\n' "$*" >&2
+  exit 1
+}
+
+[ $# -ge 1 ] || usage
+apk=$1
+tag=${2:-}
+[ -f "$apk" ] || fail "no such file: $apk"
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed, so the release cannot be read."
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is not installed."
+
+# apksigner ships in the Android build-tools, which are not always on PATH.
+if [ -n "${PFC_APKSIGNER:-}" ]; then
+  apksigner=$PFC_APKSIGNER
+elif command -v apksigner >/dev/null 2>&1; then
+  apksigner=$(command -v apksigner)
+else
+  # Newest installed build-tools wins; older ones may not read newer schemes.
+  apksigner=$(ls -1 "${ANDROID_HOME:-/usr/lib/android-sdk}"/build-tools/*/apksigner 2>/dev/null |
+    sort -V | tail -1 || true)
+  [ -n "$apksigner" ] ||
+    fail "apksigner was not found. Install Android build-tools, or set PFC_APKSIGNER to its path."
+fi
+
+# The APK being checked usually lives outside this checkout (a Downloads folder),
+# so the repository is resolved from the script's own location rather than from
+# the working directory, and PFC_REPO covers a copy of the script run elsewhere.
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+repository=${PFC_REPO:-$(git -C "$root" remote get-url origin 2>/dev/null |
+  sed -e 's#.*github\.com[:/]##' -e 's#\.git$##')}
+case $repository in
+  */*) ;;
+  *)
+    repository=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) ||
+      fail "cannot tell which GitHub repository this is; set PFC_REPO=owner/name."
+    ;;
+esac
+
+if [ -z "$tag" ]; then
+  tag=$(gh release view --repo "$repository" --json tagName -q .tagName 2>/dev/null) ||
+    fail "cannot find the newest release of $repository; pass the tag explicitly."
+fi
+
+local_sha=$(sha256sum -- "$apk" | cut -d' ' -f1)
+
+# --- 1. checksum against the published sidecars ------------------------------
+
+sides=$(mktemp -d)
+trap 'rm -rf -- "$sides"' EXIT
+
+gh release view "$tag" --repo "$repository" --json assets \
+  -q '.assets[] | select(.name | endswith(".sha256")) | .name' >"$sides/list" 2>/dev/null ||
+  fail "cannot read the assets of release $tag (check 'gh auth status')."
+
+if [ ! -s "$sides/list" ]; then
+  reject "release $tag publishes no .sha256 sidecar, so there is nothing to verify $apk against."
+fi
+
+# The sidecars are a few hundred bytes each, so all of them come down at once
+# and the match is made locally; fetching one by name would fail on a renamed
+# download.
+gh release download "$tag" --repo "$repository" --pattern '*.sha256' --dir "$sides" \
+  >/dev/null 2>&1 || fail "cannot download the .sha256 assets of release $tag."
+
+matched=
+while IFS= read -r side; do
+  [ -f "$sides/$side" ] || continue
+  while read -r digest name; do
+    [ -n "${digest:-}" ] || continue
+    if [ "${digest,,}" = "${local_sha,,}" ]; then
+      matched=$side
+      published_name=${name:-$side}
+      break 2
+    fi
+  done <"$sides/$side"
+done <"$sides/list"
+
+if [ -z "$matched" ]; then
+  printf 'verify-apk: %s does not match any checksum published for %s.\n' "$apk" "$tag" >&2
+  printf '            local sha256: %s\n' "$local_sha" >&2
+  while IFS= read -r side; do
+    [ -f "$sides/$side" ] || continue
+    printf '            %s: %s\n' "$side" "$(cut -d' ' -f1 <"$sides/$side")" >&2
+  done <"$sides/list"
+  printf '            The file was truncated or altered, or it is not from this release.\n' >&2
+  exit 1
+fi
+
+# --- 2. signature against the release signer ---------------------------------
+
+# Fail closed on a file that will not parse as an APK at all.
+certs=$("$apksigner" verify --print-certs "$apk" 2>/dev/null) ||
+  reject "$apk does not verify: the signature is missing, broken, or the APK is malformed."
+
+signer_sha=$(printf '%s\n' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+signer_cn=$(printf '%s\n' "$certs" | sed -n 's/^Signer #1 certificate DN: //p' | head -1)
+[ -n "$signer_sha" ] || reject "$apk has no readable signing certificate."
+
+expected=$(printf '%s' "${PFC_SIGNER_SHA256:-$DEFAULT_SIGNER_SHA256}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+
+if [ "$signer_sha" != "$expected" ]; then
+  printf 'verify-apk: %s is signed by a certificate this project does not publish under.\n' "$apk" >&2
+  printf '            signer:   %s\n' "$signer_sha" >&2
+  printf '            expected: %s\n' "$expected" >&2
+  printf '            A debug build, a fork, or a repackaged file looks like this.\n' >&2
+  exit 1
+fi
+
+# --- report ------------------------------------------------------------------
+
+printf 'verify-apk: %s is verified\n' "$apk"
+printf '  release:  %s (%s)\n' "$tag" "$repository"
+printf '  sha256:   %s\n' "$local_sha"
+printf '  sidecar:  %s' "$matched"
+if [ -n "${published_name:-}" ] && [ "$(basename -- "$apk")" != "$published_name" ]; then
+  printf ' (published as %s)' "$published_name"
+fi
+printf '\n'
+printf '  signer:   %s\n' "${signer_cn:-unknown}"
+printf '            %s\n' "$signer_sha"

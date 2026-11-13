@@ -233,6 +233,30 @@ which pair disagree and why before it lands. A release that cannot be read at al
 twice and then fails, so an API blip does not redden every pull request but an unverified
 release is never reported as verified.
 
+```bash
+./scripts/verify-apk ~/Downloads/personal-finance-companion-0.6.4.apk v0.6.4
+./scripts/verify-apk personal-finance-companion-0.6.4.apk   # newest release
+```
+
+`verify-apk` answers the downloader's question — is this file the build that release
+published? Two checks, and both must pass. The file's SHA-256 has to equal a digest in one of
+that release's `.sha256` sidecars, and its signing certificate has to be the project's release
+signer. A checksum on its own only proves the bytes arrived intact from wherever they came;
+the pinned certificate is what shows this repository built them, so a debug build or a
+repackaged file fails even if someone publishes a digest that matches it. The sidecar is
+matched by digest rather than by file name, so a renamed download still verifies, and a
+release that publishes no sidecar is rejected instead of being accepted as verified.
+
+Exit status separates the two kinds of no: `0` verified, `1` not verified (digest matches
+nothing, signature missing or foreign), and `2` could not verify — no `gh`, no `apksigner`,
+no GitHub auth, or a release that cannot be read. The third is deliberately not success: a
+file nobody could check is not a file that checked out.
+
+`apksigner` is taken from `PATH`, otherwise from the newest build-tools under `$ANDROID_HOME`
+(or `/usr/lib/android-sdk`); set `PFC_APKSIGNER` to a specific binary. A fork or a rebuilt key
+sets `PFC_SIGNER_SHA256` to its own certificate digest, and running the script from outside a
+checkout sets `PFC_REPO=owner/name` — it resolves the repository from its own location first.
+
 The same suite also runs **nightly at 03:17 UTC against `master`**, because some failures
 arrive without a push: a dependency's new release, a test that only fails on a particular
 date, or a fixture that aged out. Scheduled runs always use the default branch's copy of the
