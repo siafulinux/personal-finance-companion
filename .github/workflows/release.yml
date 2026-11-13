@@ -9,8 +9,13 @@ name: Release
 # that cuts the tag, but a tag can be pushed from anywhere, so the rule is
 # repeated here rather than assumed.
 #
-# Nothing is attached: the APK is signed with a key that deliberately stays off
-# CI, so the artifact is uploaded by hand after `apksigner verify`.
+# The APK is attached by the `artifact` job, which signs it with a key that is
+# still not on CI: the workflow holds a *deploy key* that can read one private
+# repository, and that repository holds the keystore and its properties. A
+# workflow log, a fork or a leaked runner therefore exposes no key material, and
+# revoking access is a repository permission rather than a secret rotation.
+# Without the deploy key the release still publishes its notes, with no
+# artifact, and the APK is uploaded by hand.
 #
 # A tag that is re-pointed after its release was published gets a warning, not a
 # red run. Nothing can be published for it a second time -- the publish job leaves
@@ -265,3 +270,243 @@ jobs:
             --title "$(cat /tmp/release-title.txt)" \
             --notes-file /tmp/release-notes.md \
             --verify-tag
+
+  artifact:
+    # Attaching runs after the notes for a reason: the notes are the release, and
+    # an Android build that fails must not take them down with it. This job
+    # failing leaves a published release with no download, which is a repair
+    # (`gh release upload`) rather than a missing release.
+    #
+    # The keystore is not a CI secret. What CI holds is a deploy key -- an SSH
+    # key that can read exactly one private repository, the one holding the
+    # keystore and its `release.properties`. Reading it per run means the key
+    # never has to be pasted into a runner-visible secret, and `git ls-remote`
+    # failing is a clear failure rather than a build that silently falls back to
+    # an unsigned APK.
+    name: Attach the signed APK
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # upload the release assets
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is signing material configured?
+        id: signing
+        env:
+          DEPLOY_KEY: ${{ secrets.PFC_SIGNING_DEPLOY_KEY }}
+          SIGNING_REPO: ${{ vars.PFC_SIGNING_REPO }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # A fork has no deploy key, and its tags should still publish notes.
+          # Missing configuration is therefore a skip with a notice, while a
+          # *partial* configuration is an error: a key with no repository would
+          # silently produce the same notes-only release and look configured.
+          if [ -z "${DEPLOY_KEY:-}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$TAG publishes notes only: PFC_SIGNING_DEPLOY_KEY is not set, so no APK is attached. Upload one with 'gh release upload $TAG <apk> <apk>.sha256'."
+            exit 0
+          fi
+          if [ -z "${SIGNING_REPO:-}" ]; then
+            echo "::error::PFC_SIGNING_DEPLOY_KEY is set but PFC_SIGNING_REPO is not, so the deploy key has nowhere to read the keystore from."
+            exit 1
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        if: steps.signing.outputs.present == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.signing.outputs.present == 'true'
+
+      - name: Read the keystore through the deploy key
+        if: steps.signing.outputs.present == 'true'
+        env:
+          DEPLOY_KEY: ${{ secrets.PFC_SIGNING_DEPLOY_KEY }}
+          SIGNING_REPO: ${{ vars.PFC_SIGNING_REPO }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/signing"
+          install -d -m 700 "$work"
+
+          printf '%s\n' "$DEPLOY_KEY" > "$work/deploy_key"
+          chmod 600 "$work/deploy_key"
+          # IdentitiesOnly stops ssh from offering the runner's other keys, and
+          # accept-new pins the host key on first use instead of prompting.
+          export GIT_SSH_COMMAND="ssh -i $work/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+          # The deploy key is read-only and scoped to this repository. One commit
+          # is enough: the properties and keystore sit at its tip.
+          git clone --quiet --depth 1 "$SIGNING_REPO" "$work/repo" || {
+            echo "::error::Could not clone $SIGNING_REPO with the deploy key. Check that the key is still added to that repository and that PFC_SIGNING_REPO names it."
+            exit 1
+          }
+
+          # Gradle reads a properties file holding storeFile, storePassword,
+          # keyAlias and keyPassword. A relative storeFile is relative to the
+          # properties file, which is not this checkout, so it is resolved here
+          # and written to a copy outside the workspace. Nothing is echoed: the
+          # runner redacts registered secrets, but a hand-printed password in a
+          # log is still a leak if it ever stops being registered.
+          python3 - "$work/repo" "$RUNNER_TEMP/release.properties" <<'PY'
+          import pathlib
+          import sys
+
+          repo, out = (pathlib.Path(arg).resolve() for arg in sys.argv[1:3])
+          wanted = ("storeFile", "storePassword", "keyAlias", "keyPassword")
+
+          source = repo / "release.properties"
+          if not source.is_file():
+              sys.exit(f"{source} is missing; the signing repository needs release.properties at its root.")
+
+          values = {}
+          for line in source.read_text(encoding="utf-8").splitlines():
+              line = line.strip()
+              if not line or line[0] in "#!" or "=" not in line:
+                  continue
+              key, _, value = line.partition("=")
+              values[key.strip()] = value.strip()
+
+          missing = [key for key in wanted if not values.get(key)]
+          if missing:
+              sys.exit(f"release.properties is missing {', '.join(missing)}; all four are required to sign.")
+
+          keystore = pathlib.Path(values["storeFile"])
+          if not keystore.is_absolute():
+              keystore = (repo / keystore).resolve()
+          if not keystore.is_file():
+              sys.exit(f"storeFile {values['storeFile']} does not exist in the signing repository.")
+
+          values["storeFile"] = str(keystore)
+          out.write_text("\n".join(f"{key}={values[key]}" for key in wanted) + "\n", encoding="utf-8")
+          out.chmod(0o600)
+          print(f"Signing material read; keystore is {keystore.name}.")
+          PY
+
+          echo "PFC_KEYSTORE_PROPERTIES=$RUNNER_TEMP/release.properties" >> "$GITHUB_ENV"
+
+      - name: Build, verify and checksum the APK
+        id: build
+        if: steps.signing.outputs.present == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+          PFC_SIGNER_SHA256: ${{ vars.PFC_SIGNER_SHA256 }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+
+          cd android
+          ./gradlew :app:assembleRelease --stacktrace
+
+          # `assembleRelease` with no key writes app-release-unsigned.apk. That
+          # absence is a failure here, not a fallback: this job exists to
+          # publish a signed artifact, and quietly attaching an unsigned one
+          # would break every install over the previous release.
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then
+            echo "::error::The release build produced no signed APK. Gradle found no release.properties or the keystore entries were empty."
+            exit 1
+          fi
+
+          # Sorted by version, and matched on the executable rather than on the
+          # directory: some SDK installs carry a non-versioned `debian` folder
+          # under build-tools, which sorts last and holds no apksigner.
+          signer=$(ls -1 "${ANDROID_HOME:-/usr/lib/android-sdk}"/build-tools/*/apksigner 2>/dev/null |
+            sort -V | tail -1)
+          [ -n "$signer" ] && [ -x "$signer" ] || {
+            echo "::error::apksigner was not found in the Android build-tools, so the signature cannot be checked."
+            exit 1
+          }
+          build_tools=$(dirname "$signer")
+
+          certs=$("$signer" verify --print-certs "$apk") || {
+            echo "::error::$apk does not verify: its signature is missing or broken."
+            exit 1
+          }
+          signer_sha=$(printf '%s\n' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          [ -n "$signer_sha" ] || {
+            echo "::error::$apk has no readable signing certificate."
+            exit 1
+          }
+
+          # The pin is what makes the artifact verifiable by downloaders:
+          # scripts/verify-apk refuses anything else, so an asset signed by a
+          # different key would fail the check every reader is told to run.
+          # A new key sets the PFC_SIGNER_SHA256 repository variable rather than
+          # editing this default, so both sides can be updated in one place.
+          expected=$(printf '%s' "${PFC_SIGNER_SHA256:-c2c7769f3c6ace9869b8a04e288f874c54e411c17fd06d93114e8198a45d5566}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          if [ "$signer_sha" != "$expected" ]; then
+            echo "::error::$apk is signed by $signer_sha, not the project's release key $expected. Refusing to publish an artifact that verifies as somebody else's build."
+            exit 1
+          fi
+
+          # Identity comes from the APK itself, so the job summary cannot claim a
+          # version the bytes do not carry.
+          identity=$("$build_tools/aapt2" dump badging "$apk" 2>/dev/null |
+            grep -m1 '^package:' | sed -E "s/.*versionCode='([^']*)'.*versionName='([^']*)'.*/versionCode \1, versionName \2/" || true)
+
+          out="$RUNNER_TEMP/upload"
+          install -d "$out"
+          name="personal-finance-companion-$version.apk"
+          cp -- "$apk" "$out/$name"
+          # Two spaces between digest and file name, the format sha256sum -c and
+          # scripts/verify-apk both read, and the same shape as the published
+          # sidecars on the earlier releases.
+          ( cd "$out" && sha256sum "$name" > "$name.sha256" )
+
+          echo "path=$out/$name" >> "$GITHUB_OUTPUT"
+          echo "asset=$name" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 <"$out/$name.sha256")" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Signed APK: $name"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| identity | ${identity:-unknown} |"
+            echo "| sha256 | $(cut -d' ' -f1 <"$out/$name.sha256") |"
+            echo "| signer | $signer_sha |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the APK and its sidecar
+        if: steps.signing.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          APK: ${{ steps.build.outputs.path }}
+          ASSET: ${{ steps.build.outputs.asset }}
+        run: |
+          set -euo pipefail
+
+          # --clobber makes a re-run idempotent: the release ends with one APK and
+          # one sidecar that agree with each other, instead of the new APK beside
+          # a stale digest, or two builds the downloader has to choose between.
+          gh release upload "$TAG" "$APK" "$APK.sha256" --clobber
+
+          # Read the sidecar back from the release rather than trusting the local
+          # file: the digest a downloader sees has to be the one for the bytes
+          # that were served, and an upload that mangled one of the two would
+          # otherwise pass.
+          check="$RUNNER_TEMP/check"
+          install -d "$check"
+          gh release download "$TAG" --pattern "$ASSET.sha256" --dir "$check" --clobber
+          local_sha=$(cut -d' ' -f1 <"$APK.sha256")
+          remote_sha=$(cut -d' ' -f1 <"$check/$ASSET.sha256")
+          if [ "$local_sha" != "$remote_sha" ]; then
+            echo "::error::The published sidecar says $remote_sha but the built APK is $local_sha."
+            exit 1
+          fi
+          echo "::notice::$TAG carries $ASSET (sha256 $local_sha) and its sidecar."
+
+      - name: Remove the deploy key
+        # Best effort, and always: a runner is disposable, but leaving the key
+        # readable until then costs nothing to clean up, and a later step in this
+        # job cannot use it once the file is gone.
+        if: always()
+        run: |
+          rm -rf -- "$RUNNER_TEMP/signing" "$RUNNER_TEMP/release.properties" "$RUNNER_TEMP/upload"
