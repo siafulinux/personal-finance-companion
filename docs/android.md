@@ -152,8 +152,14 @@ accepted from `PFC_KEYSTORE_FILE`, `PFC_KEYSTORE_PASSWORD`, `PFC_KEY_ALIAS` and
 ```
 
 With no key present the release build is still produced, just unsigned — a contributor
-never needs the release key to compile. Because of that, an artifact is only published
-after `apksigner verify` reports a signer. A new key changes the app's identity: an
+never needs the release key to compile. The file is then named
+`app-release-unsigned.apk`, and `apksigner verify` reports `DOES NOT VERIFY` / `ERROR:
+Missing META-INF/MANIFEST.MF` for it. Because of that, an artifact is only published
+after `apksigner verify --print-certs` names a signer. On this project the release
+certificate is `CN=Personal Finance Companion, OU=Release, O=Personal Finance Companion,
+C=US` with SHA-256 digest
+`c2c7769f3c6ace9869b8a04e288f874c54e411c17fd06d93114e8198a45d5566`, so a build signed by any
+other key is not this app's artifact. A new key changes the app's identity: an
 install signed with a different key must be uninstalled first, so keep this keystore and
 its password safe.
 
