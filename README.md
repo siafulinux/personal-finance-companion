@@ -226,6 +226,13 @@ are deliberately extended by hand (the checksums and artifact details on `v0.6.0
 listed inside the script and reported as annotated rather than skipped; `PFC_ALLOW_DRIFT=""`
 enforces the strict comparison for every release.
 
+CI runs it on every push and pull request, inside the required **Web typecheck and tests**
+job — a separate job would go red without blocking a merge. So editing a shipped version's
+changelog section means updating that release's notes in the same change, or the build says
+which pair disagree and why before it lands. A release that cannot be read at all is retried
+twice and then fails, so an API blip does not redden every pull request but an unverified
+release is never reported as verified.
+
 The same suite also runs **nightly at 03:17 UTC against `master`**, because some failures
 arrive without a push: a dependency's new release, a test that only fails on a particular
 date, or a fixture that aged out. Scheduled runs always use the default branch's copy of the

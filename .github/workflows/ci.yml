@@ -315,6 +315,42 @@ jobs:
         # after a dependency install.
         working-directory: .
         run: ./scripts/verify-doc-images
+      - name: Check every published release still matches the changelog
+        # Also in this job, for the same reason: a standalone job could go red
+        # without blocking a merge. A release body is generated from the
+        # changelog once and can drift afterwards -- notes edited on GitHub the
+        # changelog never learned about, or a changelog entry rewritten without
+        # updating the release -- which leaves the published page contradicting
+        # the repository. Editing a shipped version's section therefore means
+        # editing its release notes in the same change; this check says so
+        # before the merge rather than after.
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Exit 1 is drift and must fail immediately. Exit 2 means the releases
+          # could not be read (an API blip, a rate limit), which is not drift, so
+          # it is retried twice before being treated as a failure -- the check
+          # still fails closed, but a single dropped request does not redden
+          # every pull request for ten minutes.
+          for attempt in 1 2 3; do
+            status=0
+            ./scripts/verify-releases || status=$?
+            [ "$status" -eq 0 ] && exit 0
+            if [ "$status" -ne 2 ]; then
+              echo "::error::A published release no longer matches its changelog section."
+              exit 1
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::The releases could not be read (attempt $attempt of 3); retrying."
+              sleep 5
+            fi
+          done
+
+          echo "::error::The published releases could not be read, so this check could not verify them."
+          exit 1
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
