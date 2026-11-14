@@ -272,9 +272,14 @@ is fixed here.
 
 ### Notes
 
-- The tag was re-cut on 2026-11-12. `v0.6.2` pointed at a tree whose manifest said `0.6.4`, so
-  the tag, the manifest and these notes disagreed; `0.6.3`–`0.6.5` were released from `master` in
-  between and keep their own sections.
+- The tag was re-cut on 2026-11-12. `v0.6.2` pointed at `3759b59c`, a tree whose manifest said
+  `0.6.4`, so the tag, the manifest and these notes disagreed; it now points at `93e69f6`, which
+  makes the manifest report `0.6.2`. `0.6.3`–`0.6.5` were released from `master` in between and
+  keep their own sections.
+- The commits are named so a revert has a target: `3759b59c` is what the tag pointed at before
+  the re-cut, and `96444e1` is its first cut on 2026-11-11. Both are reachable from `master`;
+  the discarded tag objects still exist locally as unreachable objects (`7ef1368b`, `78e8c3b8`),
+  which is how these SHAs were recovered after the ref moved.
 
 ---
 
