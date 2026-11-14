@@ -11,6 +11,13 @@ name: Release
 #
 # Nothing is attached: the APK is signed with a key that deliberately stays off
 # CI, so the artifact is uploaded by hand after `apksigner verify`.
+#
+# A tag that is re-pointed after its release was published gets a warning, not a
+# red run. Nothing can be published for it a second time -- the publish job leaves
+# an existing release alone, so notes edited on GitHub survive -- which means the
+# first-publication gates below could only fail without changing anything. Both of
+# them ask `scripts/release-published` first and stand aside for a tag that already
+# has a release; a tag without one still has to pass every check.
 on:
   push:
     tags: ["v*"]
@@ -36,7 +43,35 @@ jobs:
           # The tag is annotated, so its tag object has to exist locally for
           # verify-ci to peel it to a commit.
           fetch-depth: 0
+      - name: Warn if this tag already has a release
+        id: released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Three answers, not two. Exit 1 means "no release" and leaves the gates
+          # below enforcing; exit 0 means "already released" and lets them stand
+          # aside with a warning. Anything else is "cannot tell", which must not be
+          # folded into either branch -- guessing "released" would skip a gate that
+          # protects a first publication.
+          status=0
+          ./scripts/release-published "${{ github.ref_name }}" || status=$?
+          case $status in
+            0)
+              echo "released=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::Tag ${{ github.ref_name }} already has a release. A re-pointed tag publishes nothing, so the checks below are skipped rather than failed."
+              ;;
+            1)
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Could not tell whether ${{ github.ref_name }} already has a release, so the checks below cannot be chosen safely."
+              exit "$status"
+              ;;
+          esac
       - name: Check the CI run for the tagged commit
+        # Skipped, not failed, for an already-released tag: see the header.
+        if: steps.released.outputs.released != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/verify-ci "${{ github.ref_name }}"
@@ -52,7 +87,34 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+      - name: Warn if this tag already has a release
+        id: released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Three answers, not two. Exit 1 means "no release" and leaves the gates
+          # below enforcing; exit 0 means "already released" and lets them stand
+          # aside with a warning. Anything else is "cannot tell", which must not be
+          # folded into either branch -- guessing "released" would skip a gate that
+          # protects a first publication.
+          status=0
+          ./scripts/release-published "${{ github.ref_name }}" || status=$?
+          case $status in
+            0)
+              echo "released=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::Tag ${{ github.ref_name }} already has a release. A re-pointed tag publishes nothing, so the checks below are skipped rather than failed."
+              ;;
+            1)
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Could not tell whether ${{ github.ref_name }} already has a release, so the checks below cannot be chosen safely."
+              exit "$status"
+              ;;
+          esac
       - name: Compare the tag with the Android version and the changelog
+        if: steps.released.outputs.released != 'true'
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -104,7 +166,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Warn if this tag already has a release
+        id: released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Same three answers as the gates above. The steps below are skipped for
+          # an already-released tag: a re-pointed tag may sit on a commit that no
+          # longer carries its changelog section, and failing over notes this run
+          # cannot publish would be a red build for a no-op. An unknown answer is
+          # still an error, never a silent skip.
+          status=0
+          ./scripts/release-published "${{ github.ref_name }}" || status=$?
+          case $status in
+            0)
+              echo "released=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::Tag ${{ github.ref_name }} already has a release. Nothing is published for a re-pointed tag, so the steps below are skipped."
+              ;;
+            1)
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Could not tell whether ${{ github.ref_name }} already has a release."
+              exit "$status"
+              ;;
+          esac
+
       - name: Read the changelog entry for this tag
+        if: steps.released.outputs.released != 'true'
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -156,6 +246,7 @@ jobs:
           printf 'Title: %s\n' "$(cat /tmp/release-title.txt)"
 
       - name: Create the release
+        if: steps.released.outputs.released != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
