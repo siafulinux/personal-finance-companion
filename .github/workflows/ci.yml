@@ -350,6 +350,12 @@ jobs:
     # changelog section blocks a merge by itself, with its own badge, instead of
     # riding along with the web suite. Nothing is installed here: the changelog
     # is read with git and python3, the releases through `gh`.
+    #
+    # The same job runs on the nightly schedule under this same name, so a night
+    # that went red because a release body drifted names that check in the alert
+    # instead of reading as a broken frontend. scripts/release-drift-report turns
+    # each broken pair into an annotation naming the tag and the `## [<version>]`
+    # heading it should have matched.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -360,7 +366,13 @@ jobs:
         # passing on a body that ends with `---`, which is exactly the silent
         # return this test exists to prevent. Offline -- fake gh, fixture
         # changelog, no token.
-        run: ./scripts/verify-releases-test
+        #
+        # `release-drift-report-test` pins the naming a failed run produces: the
+        # report is what makes a red night identifiable at a glance, so a
+        # regression to a generic message has to fail something.
+        run: |
+          ./scripts/verify-releases-test
+          ./scripts/release-drift-report-test
       - name: Check every published release still matches the changelog
         # A release body is generated from the changelog once and can drift
         # afterwards -- notes edited on GitHub the changelog never learned
@@ -374,6 +386,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Kept in a file rather than a variable: the diff for a drifted release
+          # can be long, and it is what a reader needs to see.
+          out=$(mktemp)
+          status=0
+
           # Exit 1 is drift and must fail immediately. Exit 2 means the releases
           # could not be read (an API blip, a rate limit), which is not drift, so
           # it is retried twice before being treated as a failure -- the check
@@ -381,19 +398,28 @@ jobs:
           # every pull request for ten minutes.
           for attempt in 1 2 3; do
             status=0
-            ./scripts/verify-releases || status=$?
-            [ "$status" -eq 0 ] && exit 0
-            if [ "$status" -ne 2 ]; then
-              echo "::error::A published release no longer matches its changelog section."
-              exit 1
-            fi
+            ./scripts/verify-releases >"$out" 2>&1 || status=$?
+            [ "$status" -eq 0 ] && break
+            [ "$status" -eq 2 ] || break
             if [ "$attempt" -lt 3 ]; then
               echo "::warning::The releases could not be read (attempt $attempt of 3); retrying."
               sleep 5
             fi
           done
 
-          echo "::error::The published releases could not be read, so this check could not verify them."
+          cat "$out"
+          [ "$status" -eq 0 ] && exit 0
+
+          if [ "$status" -ne 1 ]; then
+            echo "::error title=Release notes could not be read::The published releases could not be read, so drift cannot be ruled out."
+            exit 1
+          fi
+
+          # One annotation per broken pair, naming the release and the changelog
+          # section, plus a step summary. Reporting only: the exit below is what
+          # fails the job, so a reporting bug cannot turn a red run green.
+          ./scripts/release-drift-report "$out"
+          echo "::error::A published release no longer matches its changelog section."
           exit 1
 
   android:
@@ -454,7 +480,10 @@ jobs:
     # cancelled or skipped night proves nothing and leaves the issue alone, which
     # is the same rule the `Nightly suite is green` gate applies.
     name: Nightly failure alert
-    needs: [backend, web, android]
+    # `release-notes` is listed so a drift-only night is reported at all, and so
+    # the close step cannot retire an issue while a release body still disagrees
+    # with its changelog section.
+    needs: [backend, web, android, release-notes]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -472,6 +501,7 @@ jobs:
           BACKEND: ${{ needs.backend.result }}
           WEB: ${{ needs.web.result }}
           ANDROID: ${{ needs.android.result }}
+          RELEASE_NOTES: ${{ needs['release-notes'].result }}
         run: |
           set -euo pipefail
 
@@ -493,6 +523,7 @@ jobs:
           - Backend tests: **$BACKEND**
           - Web typecheck and tests: **$WEB**
           - Android unit tests: **$ANDROID**
+          - Release notes match the changelog: **$RELEASE_NOTES**
 
           Nothing was pushed to cause this: a nightly failure usually means drift from
           outside the repository — a dependency release, a test that only fails on a
@@ -510,6 +541,19 @@ jobs:
           EOF
           )
 
+          # A drifting release body is not a code fault, and sending whoever reads
+          # this to the frontend would waste their first hour. Say what it means
+          # when this is the check that failed.
+          if [ "$RELEASE_NOTES" = "failure" ]; then
+            body="$body
+
+          The **Release notes match the changelog** check failed: a published release no longer
+          says what its \`CHANGELOG.md\` section says. That job's annotations name the tag and
+          the \`## [<version>]\` heading it should have matched. Fix it by editing the release
+          body back to its section, or by changing the section and republishing -- no application
+          code needs to change for this one."
+          fi
+
           existing=$(gh issue list --repo "$REPO" --label ci-nightly --state open \
             --limit 1 --json number --jq '.[0].number // empty')
 
@@ -526,7 +570,7 @@ jobs:
       - name: Close the issue once the night is green
         # Only a fully passing night closes it: `cancelled` and `skipped` prove
         # nothing either way, so they leave the issue as it was.
-        if: ${{ needs.backend.result == 'success' && needs.web.result == 'success' && needs.android.result == 'success' }}
+        if: ${{ needs.backend.result == 'success' && needs.web.result == 'success' && needs.android.result == 'success' && needs['release-notes'].result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -553,6 +597,7 @@ jobs:
           - Backend tests: **success**
           - Web typecheck and tests: **success**
           - Android unit tests: **success**
+          - Release notes match the changelog: **success**
 
           Closing automatically. If it recurs, the next red night opens or updates an
           issue again, so nothing is lost by letting this one go.

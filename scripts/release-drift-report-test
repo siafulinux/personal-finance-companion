@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# Regression tests for scripts/release-drift-report.
+#
+#   scripts/release-drift-report-test
+#
+# The report is what a scheduled night uses to say *which* release drifted, so a
+# silent regression here turns a named failure back into "some job went red".
+# Each case feeds it a canned `verify-releases` transcript and checks the
+# annotation it emits: the tag, the `## [<version>]` heading and, where it
+# matters, the reason.
+#
+#   case                                                exit  meaning
+#   1  one DRIFT line                                      0  names tag + section
+#   2  NO CHANGELOG ENTRY                                  0  says there is no section
+#   3  TRAILING SEPARATOR                                  0  names the separator rule
+#   4  UNREADABLE                                          0  says it could not be read
+#   5  two broken releases and one ok                      0  one annotation each, ok skipped
+#   6  annotated release (ok by exemption)                 0  not reported as drift
+#   7  clean transcript, no tag lines                      0  reports the unnamed failure
+#   8  summary file                                        0  heading, pair and diff
+#   9  no GITHUB_STEP_SUMMARY                              0  annotations, no summary write
+#  10  PFC_CHANGELOG pointing elsewhere                    0  names the file compared
+#  11  transcript file missing                             2  refuses to guess
+#  12  no arguments                                        2  usage
+#
+# Exit codes: 0 every case behaves as intended, 1 a case regressed, 2 cannot run.
+set -euo pipefail
+
+fail() {
+  printf 'release-drift-report-test: %s\n' "$*" >&2
+  exit 2
+}
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+report=$root/scripts/release-drift-report
+[ -x "$report" ] || fail "no executable at $report."
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# --- transcripts, shaped like the verifier's real output ----------------------
+
+cat >"$work/drift" <<'EOF'
+v9.9.2     DRIFT
+             changelog 120 chars, release 90 chars
+             --- changelog
+             +++ release
+v9.9.1     ok
+
+1 matched, 1 drifted, 0 unverifiable (octo/repo, CHANGELOG.md)
+verify-releases: 1 release(s) disagree with the changelog. Update the note or the changelog so they agree.
+EOF
+
+cat >"$work/no-entry" <<'EOF'
+v9.9.3   NO CHANGELOG ENTRY  no '## [9.9.3]' entry in the changelog
+v9.9.1     ok
+
+1 matched, 0 drifted, 1 unverifiable (octo/repo, CHANGELOG.md)
+verify-releases: 1 release(s) could not be compared.
+EOF
+
+cat >"$work/separator" <<'EOF'
+v9.9.4     TRAILING SEPARATOR
+             the body ends with '---', a Markdown separator rather than notes
+v9.9.1     ok
+
+verify-releases: 1 release(s) end with a Markdown separator. Strip it so the note ends on content.
+EOF
+
+cat >"$work/unreadable" <<'EOF'
+v9.9.5   UNREADABLE  gh: Not Found (HTTP 404)
+v9.9.1     ok
+
+verify-releases: 1 release(s) could not be compared.
+EOF
+
+cat >"$work/two" <<'EOF'
+v9.9.7     DRIFT
+             changelog 10 chars, release 8 chars
+v9.9.8   NO CHANGELOG ENTRY  no '## [9.9.8]' entry in the changelog
+v0.6.0     ok (annotated by hand, allowed)
+v9.9.1     ok
+
+verify-releases: 2 release(s) disagree with the changelog.
+EOF
+
+cat >"$work/clean" <<'EOF'
+v9.9.1     ok
+v0.6.0     ok (annotated by hand, allowed)
+
+8 matched, 1 annotated, 0 drifted, 0 ending in a separator, 0 unverifiable (octo/repo, CHANGELOG.md)
+EOF
+
+# --- the cases ---------------------------------------------------------------
+
+passed=0
+failed=0
+
+# run_case <label> <transcript> <expected-exit> <required-text> [<forbidden-text>]
+run_case() {
+  label=$1
+  transcript=$2
+  expected=$3
+  required=$4
+  forbidden=${5:-}
+
+  output=
+  status=0
+  output=$(bash "$report" "$transcript" 2>&1) || status=$?
+
+  problem=
+  if [ "$status" -ne "$expected" ]; then
+    problem="exit $status, expected $expected"
+  elif [ -n "$required" ] && ! printf '%s' "$output" | grep -Fq -- "$required"; then
+    problem="output does not say \"$required\""
+  elif [ -n "$forbidden" ] && printf '%s' "$output" | grep -Fq -- "$forbidden"; then
+    problem="output should not say \"$forbidden\""
+  fi
+
+  if [ -n "$problem" ]; then
+    failed=$((failed + 1))
+    printf '  %-52s FAIL  %s\n' "$label" "$problem"
+    printf '%s\n' "$output" | sed 's/^/      | /'
+  else
+    passed=$((passed + 1))
+    printf '  %-52s ok    (exit %s)\n' "$label" "$status"
+  fi
+}
+
+printf 'release-drift-report-test: %s\n\n' \
+  "$(cd "$root" && git rev-parse --short HEAD 2>/dev/null || echo no-git)"
+
+run_case "1. one DRIFT line" "$work/drift" 0 \
+  "title=Release notes drift (v9.9.2)::The published notes for v9.9.2 disagree with the '## [9.9.2]' section of CHANGELOG.md."
+run_case "2. NO CHANGELOG ENTRY" "$work/no-entry" 0 \
+  "has no '## [9.9.3]' section in CHANGELOG.md"
+run_case "3. TRAILING SEPARATOR" "$work/separator" 0 \
+  "title=Release notes drift (v9.9.4)::The published notes for v9.9.4 end with a Markdown separator"
+run_case "4. UNREADABLE" "$work/unreadable" 0 \
+  "The published notes for v9.9.5 could not be read"
+run_case "5. two broken releases, one ok" "$work/two" 0 \
+  "title=Release notes drift (v9.9.8)"
+run_case "6. annotated release is not drift" "$work/two" 0 "" "drift (v0.6.0)"
+run_case "7. clean transcript, failure not named" "$work/clean" 0 \
+  "failed without naming a release"
+
+# The message has to quote the file that was actually compared: a maintenance
+# branch points PFC_CHANGELOG at a path of its own, and naming CHANGELOG.md there
+# would send the reader to a file the check never opened.
+custom_output=
+
+custom_output=$(cd "$work" && PFC_CHANGELOG="$work/custom-changelog.md" \
+  bash "$report" "$work/drift" 2>&1) || true
+if printf '%s' "$custom_output" | grep -Fq "section of custom-changelog.md"; then
+  passed=$((passed + 1))
+  printf '  %-52s ok\n' "10. PFC_CHANGELOG names the file compared"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  %s\n' "10. PFC_CHANGELOG names the file compared" \
+    "the annotation did not name custom-changelog.md"
+  printf '%s\n' "$custom_output" | sed 's/^/      | /'
+fi
+
+# Case 5 has to name both tags, and the ok line must not be reported: one
+# annotation each is the whole point of the script.
+two_output=$(bash "$report" "$work/two" 2>&1) || true
+annotations=$(printf '%s\n' "$two_output" | grep -c '^::error title=Release notes drift' || true)
+if [ "$annotations" -eq 2 ]; then
+  passed=$((passed + 1))
+  printf '  %-52s ok    (%s annotations)\n' "5b. exactly two annotations for two releases" "$annotations"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  %s\n' "5b. exactly two annotations for two releases" \
+    "found $annotations, expected 2"
+  printf '%s\n' "$two_output" | sed 's/^/      | /'
+fi
+
+# The summary is what a reader sees without opening the log, so it has to carry
+# the pair and the verifier's diff.
+: >"$work/summary.md"
+GITHUB_STEP_SUMMARY="$work/summary.md" bash "$report" "$work/drift" >/dev/null 2>&1 || true
+summary_problem=
+grep -Fq "### Release notes drifted" "$work/summary.md" || summary_problem="no heading"
+grep -Fq '`v9.9.2` ↔ `CHANGELOG.md` section `## [9.9.2]`' "$work/summary.md" ||
+  summary_problem=${summary_problem:-"no pair bullet"}
+grep -Fq "+++ release" "$work/summary.md" || summary_problem=${summary_problem:-"no diff"}
+if [ -z "$summary_problem" ]; then
+  passed=$((passed + 1))
+  printf '  %-52s ok\n' "8. summary names the pair and carries the diff"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  %s\n' "8. summary names the pair and carries the diff" "$summary_problem"
+  sed 's/^/      | /' "$work/summary.md"
+fi
+
+# Unset summary must not be a write to the empty string, which would be an error
+# under `set -e` exactly when a night is already red.
+summary_absent_output=
+summary_absent_status=0
+summary_absent_output=$(env -u GITHUB_STEP_SUMMARY bash "$report" "$work/drift" 2>&1) || \
+  summary_absent_status=$?
+if [ "$summary_absent_status" -eq 0 ] &&
+  printf '%s' "$summary_absent_output" | grep -Fq "title=Release notes drift (v9.9.2)"; then
+  passed=$((passed + 1))
+  printf '  %-52s ok\n' "9. no GITHUB_STEP_SUMMARY"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  exit %s\n' "9. no GITHUB_STEP_SUMMARY" "$summary_absent_status"
+  printf '%s\n' "$summary_absent_output" | sed 's/^/      | /'
+fi
+
+run_case "11. transcript file missing" "$work/does-not-exist" 2 "cannot read"
+
+usage_status=0
+bash "$report" >/dev/null 2>&1 || usage_status=$?
+if [ "$usage_status" -eq 2 ]; then
+  passed=$((passed + 1))
+  printf '  %-52s ok\n' "12. no arguments"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  exit %s, expected 2\n' "12. no arguments" "$usage_status"
+fi
+
+printf '\n%d passed, %d failed\n' "$passed" "$failed"
+if [ "$failed" -gt 0 ]; then
+  printf 'release-drift-report-test: %d case(s) regressed.\n' "$failed" >&2
+  exit 1
+fi
+printf 'release-drift-report-test: every case behaves as intended.\n'
