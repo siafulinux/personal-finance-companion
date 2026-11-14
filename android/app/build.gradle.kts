@@ -139,8 +139,11 @@ android {
         // build rather than waiting for the next release. 12 is the next free code:
         // 11 belongs to the 0.6.0.1 maintenance build, and reusing it would put two
         // different APKs at one number.
-        versionCode = 12
-        versionName = "0.6.7"
+        // 0.6.8: 0.6.7 was merged but never tagged, so the number moved on rather
+        // than leaving a build claiming a release that does not exist. 13 is next
+        // free; below it sit 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
+        versionCode = 13
+        versionName = "0.6.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.

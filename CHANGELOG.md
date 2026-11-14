@@ -8,6 +8,22 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.8] — 2026-11-13 — the number catches up with the build
+
+0.6.7 was merged but never tagged, so the build that names it never became a release. This
+entry supersedes it: no code changed between the two, and the section below still describes
+everything the build carries. What changes here is only the number, so a build can no longer
+claim a version that has no release behind it.
+
+### Changed
+
+- **The manifest names `0.6.8` / `versionCode` 13.** 12 belonged to the 0.6.7 build that was
+  never published; reusing it would leave two different trees sharing one install number.
+  13 is the next free code — 0.6.2 shipped 9, the 0.6.0.1 maintenance build holds 11, and
+  0.6.7 holds 12.
+
+---
+
 ## [0.6.7] — 2026-11-13 — releases that check themselves, and two date bugs
 
 Everything here was already on `master` while the manifest still named 0.6.6, which is why
