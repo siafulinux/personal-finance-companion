@@ -287,6 +287,14 @@ An issue that outlives its failure is worse than none — it trains whoever read
 ignore it. `cancelled` and `skipped` nights change nothing, since they prove neither
 outcome; that is the same rule the merge gate applies.
 
+Release drift gets its own nightly job. On a push or a pull request the release-notes check
+runs inside `Web typecheck and tests`, because that is a required check and a standalone job
+could go red without blocking a merge. A night has no merge to block, so the same check runs
+there as `Release notes match the changelog`, which fails on a name that says what broke: it
+annotates each drifting release with the `CHANGELOG.md` section it disagrees with, and writes
+the pair into the step summary. A drift-only night therefore no longer reads as a broken
+frontend.
+
 A red night blocks the next merge. The `Nightly suite is green` job runs on every pull
 request, reads the most recent completed scheduled run and fails while that run is red, so a
 broken `master` cannot be merged over. The nightly itself cannot be the required check: a

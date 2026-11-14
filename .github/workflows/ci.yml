@@ -332,6 +332,12 @@ jobs:
         # the repository. Editing a shipped version's section therefore means
         # editing its release notes in the same change; this check says so
         # before the merge rather than after.
+        #
+        # Not on a scheduled night: `release-notes` below runs the same check then
+        # and names the drifting release. Leaving it here as well would redden two
+        # jobs for one cause and file the night under "Web typecheck and tests",
+        # which points at the frontend while the fault is a release body.
+        if: github.event_name != 'schedule'
         working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
@@ -372,6 +378,86 @@ jobs:
         run: npm run typecheck
       - name: Run tests
         run: npm test
+
+  release-notes:
+    name: Release notes match the changelog
+    # The nightly copy of the check above, kept separate for one reason: naming.
+    # On a push or a pull request the check has to live inside `web` so it can
+    # block a merge, but a night has no merge to block, and a drift-only night
+    # reported as "Web typecheck and tests" sends whoever reads the issue to the
+    # frontend. This job fails on its own name instead, and its annotations name
+    # the release and the changelog section that disagree.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the release-body checks against fixtures
+        # The same guard the `web` job runs: the naming below is only worth
+        # anything if the check it reports on still enforces its rules.
+        run: ./scripts/verify-releases-test
+      - name: Name every release whose notes no longer match its section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Kept in a file rather than a variable: the diff for a drifted release
+          # can be long, and it is what a reader needs to see.
+          out=$(mktemp)
+          status=0
+
+          # Same contract as the `web` job: 1 is drift and fails at once, 2 means
+          # the releases could not be read and is retried before failing closed.
+          for attempt in 1 2 3; do
+            status=0
+            ./scripts/verify-releases >"$out" 2>&1 || status=$?
+            [ "$status" -eq 0 ] && break
+            [ "$status" -eq 2 ] || break
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::The releases could not be read (attempt $attempt of 3); retrying."
+              sleep 5
+            fi
+          done
+
+          cat "$out"
+          [ "$status" -eq 0 ] && exit 0
+
+          if [ "$status" -ne 1 ]; then
+            echo "::error title=Release notes could not be read::The published releases could not be read, so drift cannot be ruled out."
+            exit 1
+          fi
+
+          # One annotation per broken pair, so the summary lists every release
+          # that drifted rather than just the fact that something did.
+          drifted=$(awk '$1 ~ /^v[0-9]/ && ($2 == "DRIFT" || $2 == "NO") { print $1 }' "$out")
+
+          if [ -z "$drifted" ]; then
+            echo "::error title=Release notes drift::A published release body disagrees with CHANGELOG.md; see the log for the release."
+            exit 1
+          fi
+
+          {
+            echo "### Release notes drifted"
+            echo
+            echo "These published releases no longer match their changelog section:"
+            echo
+            for tag in $drifted; do
+              echo "- \`$tag\` ↔ \`CHANGELOG.md\` section \`## [${tag#v}]\`"
+            done
+            echo
+            echo "Either edit the release body back to its section, or change the section and"
+            echo "republish the release -- the two have to say the same thing."
+            echo
+            echo '```'
+            cat "$out"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          for tag in $drifted; do
+            echo "::error title=Release notes drift ($tag)::The published notes for $tag disagree with the '## [${tag#v}]' section of CHANGELOG.md."
+          done
+          exit 1
 
   docs:
     name: Documented images and links
@@ -441,11 +527,15 @@ jobs:
     # The same job closes it once a night passes again. An issue that stays open
     # after the breakage is fixed is worse than no issue: it teaches whoever reads
     # the list to ignore it, and it leaves the repository claiming a failure that
-    # has stopped happening. The close runs only when all three suites passed -- a
+    # has stopped happening. The close runs only when every suite passed -- a
     # cancelled or skipped night proves nothing and leaves the issue alone, which
     # is the same rule the `Nightly suite is green` gate applies.
+    #
+    # `release-notes` is one of those suites: drift between a published release and
+    # its changelog is only visible from the API, so it is exactly the kind of
+    # breakage a night has to report.
     name: Nightly failure alert
-    needs: [backend, web, android]
+    needs: [backend, web, android, release-notes]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -463,6 +553,7 @@ jobs:
           BACKEND: ${{ needs.backend.result }}
           WEB: ${{ needs.web.result }}
           ANDROID: ${{ needs.android.result }}
+          RELEASE_NOTES: ${{ needs.release-notes.result }}
         run: |
           set -euo pipefail
 
@@ -484,6 +575,7 @@ jobs:
           - Backend tests: **$BACKEND**
           - Web typecheck and tests: **$WEB**
           - Android unit tests: **$ANDROID**
+          - Release notes match the changelog: **$RELEASE_NOTES**
 
           Nothing was pushed to cause this: a nightly failure usually means drift from
           outside the repository — a dependency release, a test that only fails on a
@@ -517,7 +609,7 @@ jobs:
       - name: Close the issue once the night is green
         # Only a fully passing night closes it: `cancelled` and `skipped` prove
         # nothing either way, so they leave the issue as it was.
-        if: ${{ needs.backend.result == 'success' && needs.web.result == 'success' && needs.android.result == 'success' }}
+        if: ${{ needs.backend.result == 'success' && needs.web.result == 'success' && needs.android.result == 'success' && needs.release-notes.result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -544,6 +636,7 @@ jobs:
           - Backend tests: **success**
           - Web typecheck and tests: **success**
           - Android unit tests: **success**
+          - Release notes match the changelog: **success**
 
           Closing automatically. If it recurs, the next red night opens or updates an
           issue again, so nothing is lost by letting this one go.
