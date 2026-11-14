@@ -289,8 +289,8 @@ broken `master` cannot be merged over. The nightly itself cannot be the required
 would leave every PR waiting on a status that can never be sent.
 
 Because a green nightly cannot exist until the fix is merged, the job honours a
-**`nightly-fix`** label as its one waiver — the fix PR still has to pass the three test
-jobs, and the label stays visible in the PR timeline. A night that is `cancelled` or
+**`nightly-fix`** label as its one waiver — the fix PR still has to pass every other required
+check, and the label stays visible in the PR timeline. A night that is `cancelled` or
 `skipped` proves nothing and does not block; a night that cannot be read from the API
 does, because an unverified night is not a verified one.
 
@@ -398,6 +398,13 @@ account, registration policy). Point the Android app at the same address —
 - [Backups](docs/backups.md) — the weekly dump/verify/prune routine, retention, restore drill and what it does not cover.
 - [Reboot verification](docs/boot-verification.md) — how to prove the supervised stack returns after a reboot, and what to check when it does not.
 - [Changelog](CHANGELOG.md) — release history, including the 2026-11-03 data loss and the restore that produced the `v0.1.0-recovered` baseline.
+
+Every page above is checked by `./scripts/verify-doc-images`, which runs as its own required
+**Documented images and links** job: a referenced screenshot must exist, and so must the target
+of every link between documents. Fenced code blocks and inline code are skipped, so an example
+containing `[text](path)` is not read as a link, and a directory target is valid. Fragments are
+stripped without checking the heading. Renaming a page therefore means updating whatever points
+at it in the same pull request, or the merge is refused.
 
 ## Limits
 
