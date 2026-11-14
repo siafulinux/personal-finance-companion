@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+# Regression tests for scripts/verify-releases, focused on the trailing-separator
+# rule: a published body that ends with a Markdown rule is always a mistake, and
+# it must fail even when its text otherwise matches the changelog, and even for a
+# release listed as deliberately annotated.
+#
+#   scripts/verify-releases-test
+#
+# A fake `gh` on PATH serves canned release bodies, and PFC_CHANGELOG points the
+# script at a fixture changelog, so the whole run happens offline with no GitHub
+# token. The real comparison code runs: only the API is stood in for.
+#
+#   case                                              exit  meaning
+#   1  clean body matching its section                 0  ok
+#   2  matching body ending in `---`                   1  separator
+#   3  same, with trailing blank lines                 1  separator
+#   4  body ending in `***`                            1  separator
+#   5  body ending in `_ _ _`                          1  separator
+#   6  `---` in the middle, clean end                  0  no false positive
+#   7  text with three dashes inline (`1---3`)         0  no false positive
+#   8  annotated release ending in `---`               1  separator, not allowed
+#   9  annotated release, no separator                 0  allowed (exemption intact)
+#  10  release with no body on GitHub                  1  unverifiable
+#  11  tags listed by the script rather than passed    0  ok
+#
+# Exit codes: 0 every case behaves as intended, 1 a case regressed,
+# 2 cannot run (no jq or python3).
+set -euo pipefail
+
+fail() {
+  printf 'verify-releases-test: %s\n' "$*" >&2
+  exit 2
+}
+
+for tool in jq python3; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is required to run these cases."
+done
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+verify=$root/scripts/verify-releases
+[ -x "$verify" ] || fail "no executable at $verify."
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# --- a stand-in for the GitHub CLI -------------------------------------------
+
+mkdir -p "$work/bin" "$work/releases"
+cat >"$work/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+# `repo view` names a repository; `release list` prints $FAKE_TAGS; `release
+# view` serves $FAKE_DIR/<tag>.json through the caller's jq expression, which is
+# what the real command prints.
+set -euo pipefail
+if [ "${1:-}" = repo ] && [ "${2:-}" = view ]; then
+  printf '%s\n' "${FAKE_REPO:-octo/repo}"
+  exit 0
+fi
+if [ "${1:-}" != release ]; then
+  printf 'fake gh: unsupported call: %s\n' "$*" >&2
+  exit 1
+fi
+sub=${2:-}
+shift 2
+
+tag=
+expression=
+namespace=tagName
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo | --limit)
+      shift 2
+      ;;
+    --json)
+      namespace=${2:-}
+      shift 2
+      ;;
+    --jq | -q)
+      expression=${2:-}
+      shift 2
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      tag=$1
+      shift
+      ;;
+  esac
+done
+
+case "$sub" in
+  list)
+    printf '%s\n' ${FAKE_TAGS:?}
+    exit 0
+    ;;
+  view)
+    file="$FAKE_DIR/$tag.json"
+    if [ ! -f "$file" ]; then
+      printf 'release not found: %s\n' "$tag" >&2
+      exit 1
+    fi
+    if [ "$namespace" != body ]; then
+      printf 'fake gh: unexpected --json %s\n' "$namespace" >&2
+      exit 1
+    fi
+    jq -r "${expression:-.body}" "$file"
+    exit 0
+    ;;
+esac
+printf 'fake gh: unsupported call: release %s\n' "$sub" >&2
+exit 1
+FAKE
+chmod +x "$work/bin/gh"
+
+# --- fixtures ----------------------------------------------------------------
+
+# Every section ends with the separator the real changelog uses between entries,
+# so the normalisation is exercised on the way in.
+cat >"$work/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [9.9.1] — 2026-01-01 — clean
+
+One line of notes.
+
+---
+
+## [9.9.2] — 2026-01-01 — separator
+
+One line of notes.
+
+---
+
+## [9.9.3] — 2026-01-01 — spaced
+
+One line of notes.
+
+---
+
+## [9.9.4] — 2026-01-01 — asterisks
+
+One line of notes.
+
+---
+
+## [9.9.5] — 2026-01-01 — underscores
+
+One line of notes.
+
+---
+
+## [9.9.6] — 2026-01-01 — middle
+
+First line.
+
+---
+
+Last line.
+
+---
+
+## [9.9.7] — 2026-01-01 — inline dashes
+
+Range 1---3 is fine.
+
+---
+
+## [0.6.0] — 2026-01-01 — annotated by hand
+
+One line of notes.
+
+---
+
+## [0.6.1] — 2026-01-01 — annotated elsewhere
+
+One line of notes.
+
+---
+EOF
+
+# body <tag> <file-with-notes> — the release GitHub would serve for that tag.
+body() {
+  jq -n --rawfile text "$2" '{body: $text}' >"$work/releases/$1.json"
+}
+
+printf 'One line of notes.\n' >"$work/b-clean"
+printf 'One line of notes.\n\n---\n' >"$work/b-rule"
+printf 'One line of notes.\n\n---\n\n  \n' >"$work/b-rule-blank"
+printf 'One line of notes.\n\n***\n' >"$work/b-stars"
+printf 'One line of notes.\n\n_ _ _\n' >"$work/b-underscores"
+printf 'First line.\n\n---\n\nLast line.\n' >"$work/b-middle"
+printf 'Range 1---3 is fine.\n' >"$work/b-inline"
+# Differing text plus a trailing rule: the annotation list must not excuse it.
+printf 'One line of notes.\n\n### Checksums\n\nabc123  file.apk\n\n---\n' >"$work/b-annotated-rule"
+printf 'One line of notes.\n\n### Checksums\n\nabc123  file.apk\n' >"$work/b-annotated"
+
+body v9.9.1 "$work/b-clean"
+body v9.9.2 "$work/b-rule"
+body v9.9.3 "$work/b-rule-blank"
+body v9.9.4 "$work/b-stars"
+body v9.9.5 "$work/b-underscores"
+body v9.9.6 "$work/b-middle"
+body v9.9.7 "$work/b-inline"
+body v0.6.0 "$work/b-annotated-rule"
+body v0.6.1 "$work/b-annotated"
+# No v9.9.8.json: that release exists but its body cannot be read.
+
+# --- the cases ---------------------------------------------------------------
+
+passed=0
+failed=0
+
+# run_case <label> <expected-exit> <required-text> [<forbidden-text>] [<tags...>]
+run_case() {
+  label=$1
+  expected=$2
+  required=$3
+  forbidden=${4:-}
+  shift 4 || true
+
+  output=
+  status=0
+  output=$(cd "$root" && PATH="$work/bin:$PATH" \
+    FAKE_DIR="$work/releases" FAKE_TAGS="v9.9.1" \
+    PFC_CHANGELOG="$work/CHANGELOG.md" PFC_ALLOW_DRIFT="${ALLOW-}" \
+    bash "$verify" "$@" 2>&1) || status=$?
+
+  problem=
+  if [ "$status" -ne "$expected" ]; then
+    problem="exit $status, expected $expected"
+  elif [ -n "$required" ] && ! printf '%s' "$output" | grep -Fq -- "$required"; then
+    problem="output does not say \"$required\""
+  elif [ -n "$forbidden" ] && printf '%s' "$output" | grep -Fq -- "$forbidden"; then
+    problem="output should not say \"$forbidden\""
+  fi
+
+  if [ -n "$problem" ]; then
+    failed=$((failed + 1))
+    printf '  %-50s FAIL  %s\n' "$label" "$problem"
+    printf '%s\n' "$output" | sed 's/^/      | /'
+  else
+    passed=$((passed + 1))
+    printf '  %-50s ok    (exit %s)\n' "$label" "$status"
+  fi
+}
+
+# v0.6.0 is annotated inside the script; v0.6.1 is added here to show the
+# exemption still applies when it is asked for.
+ALLOW=$'v0.6.0\nv0.6.1'
+
+printf 'verify-releases-test: %s\n\n' "$(cd "$root" && git rev-parse --short HEAD 2>/dev/null || echo no-git)"
+
+run_case "1. clean body matches its section" 0 "ok" "" v9.9.1
+run_case "2. matching body ending in ---" 1 "TRAILING SEPARATOR" " ok" v9.9.2
+run_case "3. ending in --- with blank lines after" 1 "TRAILING SEPARATOR" "" v9.9.3
+run_case "4. ending in ***" 1 "TRAILING SEPARATOR" "" v9.9.4
+run_case "5. ending in _ _ _" 1 "TRAILING SEPARATOR" "" v9.9.5
+run_case "6. separator in the middle only" 0 "ok" "" v9.9.6
+run_case "7. three dashes inline" 0 "ok" "" v9.9.7
+run_case "8. annotated release with trailing ---" 1 "TRAILING SEPARATOR" \
+  "annotated by hand" v0.6.0
+run_case "9. annotated release left alone" 0 "annotated by hand" "" v0.6.1
+run_case "10. release body unreadable" 1 "could not be compared" "" v9.9.8
+run_case "11. tags listed rather than passed" 0 "ok" ""
+
+# The refusal for a separator has to name the offending line, not just fail:
+# a bare "sf truthy" exit would send the reader to the changelog instead of the
+# release body, which is the thing that has to change.
+ALLOW=
+rule_output=$(cd "$root" && PATH="$work/bin:$PATH" \
+  FAKE_DIR="$work/releases" FAKE_TAGS="v9.9.2" \
+  PFC_CHANGELOG="$work/CHANGELOG.md" bash "$verify" v9.9.2 2>&1) || true
+if printf '%s' "$rule_output" | grep -Fq "'---'"; then
+  passed=$((passed + 1))
+  printf '  %-50s ok\n' "12. refusal names the separator"
+else
+  failed=$((failed + 1))
+  printf '  %-50s FAIL  %s\n' "12. refusal names the separator" \
+    "the output did not quote the offending line"
+  printf '%s\n' "$rule_output" | sed 's/^/      | /'
+fi
+
+printf '\n%d passed, %d failed\n' "$passed" "$failed"
+if [ "$failed" -gt 0 ]; then
+  printf 'verify-releases-test: %d case(s) regressed.\n' "$failed" >&2
+  exit 1
+fi
+printf 'verify-releases-test: every case behaves as intended.\n'

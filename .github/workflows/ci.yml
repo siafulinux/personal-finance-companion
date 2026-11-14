@@ -315,6 +315,14 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - name: Test the release-body checks against fixtures
+        # Runs before the check it guards: if the trailing-separator rule were
+        # ever dropped from verify-releases, the check below would go back to
+        # passing on a body that ends with `---`, which is exactly the silent
+        # return this test exists to prevent. Offline -- fake gh, fixture
+        # changelog, no token.
+        working-directory: .
+        run: ./scripts/verify-releases-test
       - name: Check every published release still matches the changelog
         # Also in this job, for the same reason: a standalone job could go red
         # without blocking a merge. A release body is generated from the
