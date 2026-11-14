@@ -247,7 +247,7 @@ nothing on the page said so.
 
 ## [0.6.3] — 2026-11-11 — release identification
 
-An installation could report the product version it runs (`2.1.0`) but not which release it
+An installation could report the product version it runs (`2.1.0`) but not which build it
 came from, so identifying a deployment meant shell access to its host. It now names its
 release tag, which is what this entry is.
 
