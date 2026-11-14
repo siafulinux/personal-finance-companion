@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
+from app.utils.dates import utc_now
 from app.utils.money import ZERO, clamp_zero, format_money, quantize
 
 
@@ -499,7 +500,7 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
 
     return SafeToSpendResult(
         currency=inputs.currency,
-        as_of=inputs.as_of or datetime.now().astimezone(),
+        as_of=inputs.as_of or utc_now(),
         today=inputs.today,
         horizon_end=inputs.horizon_end,
         payday=inputs.payday,

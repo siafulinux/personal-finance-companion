@@ -232,6 +232,40 @@ def test_virtual_savings_reduce_safe_to_spend_once(db, user, account, prefs):
     assert payload["progress_percent"] == Decimal("20.00")
 
 
+def test_contribution_schedule_starts_on_the_goals_local_day(db, user):
+    """A goal created in the Americas evening is dated tomorrow in UTC.
+
+    `created_at` is stored in UTC, so a goal created at 20:30 in New York carries the
+    next day's UTC date. Counting the schedule from that date put every contribution a
+    day late for the user who created it. Both calendars are asserted: the same row has
+    to give the UTC answer when asked for UTC, and the New York answer when asked for
+    New York.
+    """
+    from datetime import UTC, datetime
+
+    goal = savings_service.create_goal(
+        db,
+        user,
+        SavingsGoalCreate(
+            name="Holiday fund",
+            target_amount=Decimal("600.00"),
+            contribution_amount=Decimal("25.00"),
+            contribution_frequency="weekly",
+        ),
+    )
+    # 01:30 UTC on 4 March is 20:30 on 3 March in New York.
+    goal.created_at = datetime(2026, 3, 4, 1, 30, tzinfo=UTC)
+    db.commit()
+
+    today = date(2026, 3, 20)
+    assert savings_service.next_contribution_date(goal, today, timezone="UTC") == date(
+        2026, 3, 25
+    )
+    assert savings_service.next_contribution_date(
+        goal, today, timezone="America/New_York"
+    ) == date(2026, 3, 24)
+
+
 def test_account_backed_savings_in_an_excluded_account_are_not_deducted_twice(db, user, prefs):
     savings = _savings_account(db, user, spendable=False, balance="500.00")
     before = compute(db, user).safe_to_spend
