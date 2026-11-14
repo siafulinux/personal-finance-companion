@@ -163,6 +163,16 @@ other key is not this app's artifact. A new key changes the app's identity: an
 install signed with a different key must be uninstalled first, so keep this keystore and
 its password safe.
 
+The release workflow signs without holding the key. It clones a private repository through a
+deploy key (`PFC_SIGNING_DEPLOY_KEY`, read-only, added to that repository) that holds the
+keystore and a `release.properties` (`PFC_SIGNING_REPO` names it), points
+`PFC_KEYSTORE_PROPERTIES` at a copy written outside the workspace, and runs
+`assembleRelease` from the tagged tree. The resulting `app-release.apk` is checked with
+`apksigner` against the project's signer before it is attached, together with a `.sha256`
+sidecar in the `sha256sum -c` format; a build that comes out unsigned, or signed by another
+key, fails the job instead of publishing. With no deploy key the job skips with a notice and
+the release ships notes only.
+
 ## Build and test
 
 ```bash

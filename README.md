@@ -216,8 +216,28 @@ both gates and the publish job stand aside (`scripts/release-published`) and the
 green with a `::warning::` annotation. A tag that cannot be checked — no `gh`, no auth, or
 an answer neither `200` nor `404` — is still an error, because guessing "already released"
 would skip a gate that protects a first publication.
-No artifact is attached: the APK is signed with a key that stays off CI, so it is uploaded
-by hand after `apksigner verify`.
+
+A signed APK and its `.sha256` sidecar are then attached by the `artifact` job. The signing
+key still never reaches CI: the workflow holds a **deploy key** whose only power is reading
+one private repository, and that repository holds the keystore and its `release.properties`.
+Two repository settings enable it — the secret `PFC_SIGNING_DEPLOY_KEY` (an SSH private key
+added as a read-only deploy key on the keystore repository) and the variable
+`PFC_SIGNING_REPO` (`git@github.com:owner/pfc-signing.git`). A log, a fork or a compromised
+runner exposes no key material, and revoking access is a repository permission rather than a
+secret rotation. The properties file is written outside the workspace with its relative
+`storeFile` resolved, and the key, the clone and that copy are deleted at the end of the job.
+
+The job refuses rather than downgrades. No `app-release.apk`, a signature that will not
+verify, or a certificate that is not the project's own fails it, so a release can never
+carry an APK that `scripts/verify-apk` would reject — that script pins the same signer,
+sha256 `c2c7769f…`, which `PFC_SIGNER_SHA256` overrides as a repository variable when the
+key is rotated. Assets are uploaded with `--clobber` and the published sidecar is read back
+and compared, so a re-run replaces a build instead of leaving two, and the digest that
+downloaders see is the one for the bytes that were served.
+
+With no deploy key — a fork, or this repository before it is configured — the release still
+publishes its notes, with a notice saying no artifact was attached. That is the only case
+where the APK is still uploaded by hand.
 
 ```bash
 ./scripts/verify-releases            # does every published release still match the changelog?
