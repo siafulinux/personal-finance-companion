@@ -28,7 +28,7 @@ from app.models.enums import Frequency, SavingsMode, SavingsStatus
 from app.schemas.savings import SavingsContributionCreate, SavingsGoalCreate, SavingsGoalUpdate
 from app.services.balances import balances_for_accounts
 from app.services.errors import ConflictError, NotFoundError, ValidationError
-from app.utils.dates import next_frequency_date, today_in
+from app.utils.dates import next_frequency_date, resolve_timezone, today_in
 from app.utils.money import ZERO, quantize
 
 MAX_SCHEDULE_ITERATIONS = 600
@@ -65,11 +65,16 @@ def _account(db: Session, user_id: uuid.UUID, account_id: uuid.UUID | None) -> F
     return account
 
 
-def next_contribution_date(goal: SavingsGoal, today: date) -> date | None:
+def next_contribution_date(
+    goal: SavingsGoal, today: date, *, timezone: str | None = None
+) -> date | None:
     if goal.contribution_amount is None or goal.contribution_frequency is None:
         return None
     last = max((c.contributed_on for c in goal.contributions), default=None)
-    cursor = last or goal.created_at.date()
+    # `created_at` is a UTC timestamp, so its date can already be the user's tomorrow:
+    # a goal created at 20:00 in the Americas is 01:00 UTC. Counting the schedule from
+    # that date put the first contribution a day late for them, every cycle after it.
+    cursor = last or goal.created_at.astimezone(resolve_timezone(timezone)).date()
     if cursor > today:
         return cursor
     for _ in range(MAX_SCHEDULE_ITERATIONS):
@@ -98,7 +103,14 @@ def _periods_until(today: date, target: date, frequency: str | None) -> int | No
     return None
 
 
-def goal_payload(db: Session, goal: SavingsGoal, *, today: date, balances: dict) -> dict[str, object]:
+def goal_payload(
+    db: Session,
+    goal: SavingsGoal,
+    *,
+    today: date,
+    balances: dict,
+    timezone: str | None = None,
+) -> dict[str, object]:
     account = db.get(FinancialAccount, goal.account_id) if goal.account_id else None
     account_balance = None
     spendable = None
@@ -116,7 +128,7 @@ def goal_payload(db: Session, goal: SavingsGoal, *, today: date, balances: dict)
     progress = (
         min(quantize((saved / target) * Decimal("100")), Decimal("100.00")) if target > ZERO else ZERO
     )
-    next_date = next_contribution_date(goal, today)
+    next_date = next_contribution_date(goal, today, timezone=timezone)
 
     required = None
     if goal.target_date is not None:
@@ -317,7 +329,10 @@ def summary(db: Session, user: User, *, today: date | None = None) -> dict[str, 
     today = today or today_in(user.timezone)
     balances = balances_for_accounts(db, user.id)
     goals = list_goals(db, user.id)
-    rows = [goal_payload(db, goal, today=today, balances=balances) for goal in goals]
+    rows = [
+        goal_payload(db, goal, today=today, balances=balances, timezone=user.timezone)
+        for goal in goals
+    ]
     active = [row for row in rows if row["status"] == SavingsStatus.ACTIVE.value]
     monthly = ZERO
     for goal in goals:
@@ -353,9 +368,11 @@ def planned_contributions(
             continue
         if goal.contribution_amount is None or goal.contribution_frequency is None:
             continue
-        due = next_contribution_date(goal, today)
+        due = next_contribution_date(goal, today, timezone=user.timezone)
         while due is not None and due <= horizon_end:
-            payload = goal_payload(db, goal, today=today, balances=balances)
+            payload = goal_payload(
+                db, goal, today=today, balances=balances, timezone=user.timezone
+            )
             out.append(
                 {
                     "goal_id": goal.id,

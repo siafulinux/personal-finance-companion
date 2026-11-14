@@ -29,7 +29,11 @@ def _payload(db: Session, user: User, goal_id: uuid.UUID) -> SavingsGoalOut:
     goal = savings_service.get_goal(db, user.id, goal_id)
     balances = balances_for_accounts(db, user.id)
     row = savings_service.goal_payload(
-        db, goal, today=today_in(user.timezone), balances=balances
+        db,
+        goal,
+        today=today_in(user.timezone),
+        balances=balances,
+        timezone=user.timezone,
     )
     return SavingsGoalOut(**row)
 
