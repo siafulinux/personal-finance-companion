@@ -173,6 +173,37 @@ sidecar in the `sha256sum -c` format; a build that comes out unsigned, or signed
 key, fails the job instead of publishing. With no deploy key the job skips with a notice and
 the release ships notes only.
 
+## Release notes inside the APK
+
+Every APK carries `assets/release-notes.txt`, so a downloaded build describes itself
+without a sidecar file next to it or a release page within reach. The text comes from the
+`CHANGELOG.md` section matching the build's version, which is also what the GitHub release
+publishes, so the two cannot drift while both exist:
+
+```bash
+unzip -p app/build/outputs/apk/release/app-release.apk assets/release-notes.txt
+```
+
+```text
+Personal Finance Companion 0.6.10 (versionCode 15)
+
+Release notes, from this version's CHANGELOG.md section:
+
+## [0.6.10] — 2026-11-14 — Safe-to-Spend stops dating itself from the server
+…
+```
+
+The file begins with the version and version code the package manager reports, so an APK
+whose notes name a different version is visibly wrong rather than quietly wrong. Both come
+from one place in `android/app/build.gradle.kts` (`appVersionName` / `appVersionCode`),
+which also feeds `versionName` and `versionCode`; the release workflow reads the same
+declaration when it checks a tag against the build.
+
+A version with no `## [x.y.z]` section in the changelog fails the build at configuration
+time, including debug builds: an APK that cannot say what it is should not exist. The text
+is generated into the build directory, never committed — a checked-in copy would be a
+second place for the released notes to be wrong.
+
 ## Build and test
 
 ```bash

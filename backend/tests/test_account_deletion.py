@@ -273,3 +273,96 @@ def test_deleting_a_user_takes_their_phase_4_rows_with_them(db, user):
             assert (
                 _owned_count(fresh, model, survivor_id) == 1
             ), f"{model.__name__} deleted another user's row"
+
+
+def test_set_null_edges_survive_the_row_they_point_at(db, user):
+    """Closing an account or a place unlinks what pointed at it, and nothing more.
+
+    ``loans.account_id``, ``savings_goals.account_id`` and
+    ``shopping_visits.tracked_location_id`` are ``ON DELETE SET NULL``: the row that
+    points at the deleted one has to survive without its link. A cascade here would
+    destroy a loan or a savings goal because a bank account was closed, and delete a
+    record of having been in a shop because the shop was removed from monitoring --
+    the opposite of what the schema promises. This pins the edge on both sides: the
+    reference clears, the row stays, and a sibling reference is untouched.
+    """
+    from datetime import timedelta
+
+    from app.models import FinancialAccount
+    from app.models.enums import AccountType
+    from app.services.accounts import delete_account
+    from app.services.visits import delete_location
+
+    account = FinancialAccount(
+        user_id=user.id,
+        name="Savings pot",
+        account_type=AccountType.SAVINGS.value,
+        opening_balance=Decimal("0.00"),
+        opening_balance_date=date.today() - timedelta(days=1),
+    )
+    place = TrackedLocation(
+        user_id=user.id,
+        name="Corner shop",
+        merchant="Corner Shop",
+        merchant_key="corner-shop",
+    )
+    db.add_all([account, place])
+    # The children need the ids of the two rows they point at.
+    db.flush()
+
+    loan = Loan(
+        user_id=user.id,
+        name="Payday loan",
+        lender="QuickCash",
+        original_amount=Decimal("300.00"),
+        opening_balance=Decimal("220.00"),
+        balance_as_of=date.today(),
+        account_id=account.id,
+    )
+    goal = SavingsGoal(
+        user_id=user.id,
+        name="Holiday",
+        target_amount=Decimal("1200.00"),
+        saved_amount=Decimal("150.00"),
+        account_id=account.id,
+    )
+    visit = ShoppingVisit(
+        user_id=user.id,
+        tracked_location_id=place.id,
+        business_name="Corner Shop",
+        merchant_key="corner-shop",
+        visited_at=datetime.now(UTC),
+        visit_day=date.today(),
+    )
+    db.add_all([loan, goal, visit])
+    db.commit()
+    loan_id, goal_id, visit_id, place_id = loan.id, goal.id, visit.id, place.id
+
+    # No history on this account, so the guard lets the delete through.
+    delete_account(db, user.id, account.id)
+    db.commit()
+
+    # A fresh session: the claim is about what the database kept, not about what
+    # this session still remembers.
+    with SessionLocal() as fresh:
+        surviving_loan = fresh.get(Loan, loan_id)
+        surviving_goal = fresh.get(SavingsGoal, goal_id)
+        assert surviving_loan is not None, "closing an account deleted its loan"
+        assert surviving_loan.account_id is None, "the loan kept a link to a deleted account"
+        assert surviving_goal is not None, "closing an account deleted its savings goal"
+        assert surviving_goal.account_id is None, "the goal kept a link to a deleted account"
+        # The visit points at the place, not the account: it must not move.
+        untouched = fresh.get(ShoppingVisit, visit_id)
+        assert untouched is not None
+        assert untouched.tracked_location_id == place_id
+
+    delete_location(db, user.id, place_id)
+    db.commit()
+
+    with SessionLocal() as fresh:
+        assert fresh.get(TrackedLocation, place_id) is None
+        surviving_visit = fresh.get(ShoppingVisit, visit_id)
+        assert surviving_visit is not None, "removing a place deleted the visit history"
+        assert (
+            surviving_visit.tracked_location_id is None
+        ), "the visit kept a link to a deleted place"
