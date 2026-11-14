@@ -125,7 +125,7 @@ jobs:
 
           case ",${labels:-}," in
             *,nightly-fix,*)
-              echo "::warning::The last nightly failed ($url) but this change carries the nightly-fix label, so it may proceed. The three test jobs are still required."
+              echo "::warning::The last nightly failed ($url) but this change carries the nightly-fix label, so it may proceed. Every required check is still enforced."
               exit 0
               ;;
           esac
