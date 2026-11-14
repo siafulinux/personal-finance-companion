@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Fail when the running stack reports a release older than the newest tag.
+#
+#   scripts/verify-release-tag                  # newest tag, localhost:8088
+#   scripts/verify-release-tag --url http://finance.example.com/api/v1
+#   scripts/verify-release-tag --tag v0.6.8     # compare against one tag
+#
+# The deployment's job is to be the release, not to be near it: /server/info
+# advertises the release an image was built from, so a stack that keeps
+# reporting an older tag after a rebuild is a stack nobody updated -- the exact
+# mistake that is invisible while every health check stays green. This compares
+# that string with the newest tag in the repository and refuses a stack that is
+# behind.
+#
+# Versions are compared by segment (`sort -V`), not as text, so 0.6.10 is newer
+# than 0.6.9 rather than shorter, and a dev or date-suffixed tag sorts where it
+# belongs instead of matching nothing. `--tag` exists for checking a deployment
+# against the release it is supposed to be running while a newer tag is already
+# on master, and for exercising this script without moving the stack.
+#
+# Running ahead of the newest tag is reported as a notice, not a failure: an
+# image built from a commit after the last tag legitimately names something no
+# tag names yet, and a check that failed for it would punish ordinary
+# development. Exit code 1 is for one thing only -- being behind.
+#
+# PFC_SMOKE_URL sets the default base URL; it should include the API prefix,
+# since that is what /server/info hangs off.
+#
+# Exit codes: 0 up to date (or ahead), 1 behind, 2 cannot check (unreachable,
+# unreadable response, or no tags in this checkout).
+set -euo pipefail
+
+BASE_URL=${PFC_SMOKE_URL:-http://localhost:8088/api/v1}
+WANT_TAG=""
+TIMEOUT=${PFC_SMOKE_TIMEOUT:-10}
+
+usage() {
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+fail() {
+  printf 'verify-release-tag: %s\n' "$*" >&2
+  exit 2
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --url)
+      [ $# -ge 2 ] || usage
+      BASE_URL=$2
+      shift 2
+      ;;
+    --tag)
+      [ $# -ge 2 ] || usage
+      WANT_TAG=$2
+      shift 2
+      ;;
+    --timeout)
+      [ $# -ge 2 ] || usage
+      TIMEOUT=$2
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      printf 'verify-release-tag: unexpected argument %s\n' "$1" >&2
+      usage
+      ;;
+  esac
+done
+
+BASE_URL=${BASE_URL%/}
+
+command -v curl >/dev/null 2>&1 || fail "curl is not installed, so the stack cannot be queried."
+command -v python3 >/dev/null 2>&1 || fail "python3 is not installed, so the response cannot be read."
+
+# The newest tag, or the one asked for. `sort -V` is what decides "newest":
+# tags are compared by version segment, and a suffix such as -dev or -android
+# sorts under its own number rather than in a separate alphabet.
+if [ -n "$WANT_TAG" ]; then
+  newest=${WANT_TAG#v}
+else
+  newest=$(git tag --list 'v*' | sed 's/^v//' | sort -V | tail -1)
+  [ -n "$newest" ] ||
+    fail "this checkout has no v* tags, so there is nothing to compare against. Fetch tags ('git fetch --tags') or pass --tag."
+fi
+
+body=$(curl -fsS --max-time "$TIMEOUT" "$BASE_URL/server/info" 2>/dev/null) ||
+  fail "cannot read $BASE_URL/server/info (is the stack running, and is the URL the API prefix?)."
+
+running=$(printf '%s' "$body" | python3 -c '
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+print(payload.get("release_tag") or "")
+') || fail "$BASE_URL/server/info did not return JSON."
+
+[ -n "$running" ] ||
+  fail "$BASE_URL/server/info reports no release_tag, so the image cannot say which release it is."
+
+running_version=${running#v}
+
+# Whichever the version sort puts last is the newer of the two.
+newer_of() { printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1; }
+
+printf '%-22s %s\n' 'reported release_tag' "$running"
+printf '%-22s %s\n' "newest tag" "v$newest"
+
+if [ "$running_version" = "$newest" ]; then
+  printf 'verify-release-tag: the stack runs the newest tag (%s).\n' "$running"
+  exit 0
+fi
+
+if [ "$(newer_of "$running_version" "$newest")" = "$running_version" ]; then
+  printf '::notice::verify-release-tag: the stack reports %s, ahead of the newest tag v%s; allowed.\n' \
+    "$running" "$newest"
+  printf 'verify-release-tag: the stack is ahead of v%s, not behind it.\n' "$newest"
+  exit 0
+fi
+
+printf 'verify-release-tag: the stack reports %s, but the newest tag is v%s.\n' "$running" "$newest" >&2
+printf '                   Rebuild the deployment from v%s and recreate the containers.\n' "$newest" >&2
+exit 1
