@@ -159,3 +159,5 @@ curl -s http://127.0.0.1:8010/api/v1/safe-to-spend \
 ## Errors
 
 Domain errors return `{"detail": "readable message", "extra": {...}}`. Validation errors return `422` with `{"detail": "Please check the highlighted fields.", "errors": [...]}`. Authentication failures are deliberately generic and do not reveal whether an email exists.
+
+See [a page that is gone](phase-9-imaginary.md).
