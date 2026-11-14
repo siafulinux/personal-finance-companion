@@ -315,14 +315,14 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      - name: Check every documentation image exists
-        # Deliberately in this job rather than one of its own: only the three
-        # required checks plus the nightly gate can block a merge, so a separate
-        # job would go red and still let the pull request through. It also runs
-        # before `npm ci`, so a renamed screenshot fails in seconds instead of
-        # after a dependency install.
+      - name: Test the release-body checks against fixtures
+        # Runs before the check it guards: if the trailing-separator rule were
+        # ever dropped from verify-releases, the check below would go back to
+        # passing on a body that ends with `---`, which is exactly the silent
+        # return this test exists to prevent. Offline -- fake gh, fixture
+        # changelog, no token.
         working-directory: .
-        run: ./scripts/verify-doc-images
+        run: ./scripts/verify-releases-test
       - name: Check every published release still matches the changelog
         # Also in this job, for the same reason: a standalone job could go red
         # without blocking a merge. A release body is generated from the
@@ -372,6 +372,20 @@ jobs:
         run: npm run typecheck
       - name: Run tests
         run: npm test
+
+  docs:
+    name: Documented images and links
+    # Its own job so the documentation check owns its status: it is a required
+    # check on master, so a renamed screenshot or a link to a page that no longer
+    # exists blocks a merge by itself instead of riding along with the web suite.
+    # Nothing else runs here, so it finishes in seconds -- the docs are read with
+    # git and python3 only, no dependency install.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documented images and inter-document links exist
+        run: ./scripts/verify-doc-images
 
   android:
     name: Android unit tests

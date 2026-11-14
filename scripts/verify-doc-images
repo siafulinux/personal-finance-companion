@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
-# Fail when a Markdown image reference points at a file that is not in the repository.
+# Fail when a Markdown reference -- an image or a link to another document -- points
+# at a file that is not in the repository.
 #
 #   scripts/verify-doc-images              # every tracked Markdown file
 #   scripts/verify-doc-images docs/        # only files under docs/
 #
 # A screenshot that was renamed, moved or never committed renders as a broken image
 # on GitHub and in the file viewer, and nothing else in CI reads the docs, so an
-# acceptance document can rot for months before a reader finds it.
+# acceptance document can rot for months before a reader finds it. The same is true
+# of a link between documents: the docs cross-reference each other heavily, and a
+# renamed page leaves every index and every 'see also' pointing at nothing.
+#
+# Links are checked the same way as images -- the target must exist, as a file or a
+# directory -- and the scanner sees only prose: fenced code blocks and inline code
+# spans are masked first, so an example in a shell snippet is not mistaken for a
+# reference. A link fragment (`page.md#heading`) is stripped before the file is
+# resolved but the heading itself is not checked, since heading slugs are GitHub's
+# own rules rather than the repository's.
 #
 # Only local references are checked. A remote URL is somebody else's file and would
 # make the build depend on the network; `data:` URIs and `#anchors` are not files
@@ -20,7 +30,7 @@
 set -euo pipefail
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0"
   exit 2
 }
 
@@ -68,14 +78,34 @@ INLINE = re.compile(r"!\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)")
 HTML = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", re.IGNORECASE)
 REFERENCE = re.compile(r"!\[[^\]]*\]\[[^\]]*\]")
 
-REMOTE = ("http://", "https://", "//", "data:", "mailto:")
+# A normal link: not an image (no leading `!`), with an optional "title" after the
+# target. Links inside code are masked before this runs, so a `[ -f x ]` test in a
+# shell example cannot be mistaken for one.
+LINK = re.compile(
+    r"(?<!!)\[[^\]\n]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+[\"'][^)]*[\"'])?\s*\)"
+)
+SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+FENCE = re.compile(r"^(?:```|~~~).*?^(?:```|~~~)[ \t]*$", re.MULTILINE | re.DOTALL)
+CODE_SPAN = re.compile(r"`[^`\n]*`")
+
+REMOTE = ("http://", "https://", "//", "data:", "mailto:", "tel:")
 
 
 def line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
+def mask_code(text: str) -> str:
+    """Blank out fenced blocks and inline spans, keeping every offset intact."""
+
+    def blank(match: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", " ", match.group(0))
+
+    return CODE_SPAN.sub(blank, FENCE.sub(blank, text))
+
+
 checked = 0
+linked = 0
 problems: list[str] = []
 
 for doc in paths:
@@ -110,6 +140,34 @@ for doc in paths:
         if not os.path.isfile(resolved):
             problems.append(f"{doc}:{line}  missing image: {target}")
 
+    for match in LINK.finditer(mask_code(text)):
+        ref = match.group(1)
+        if ref.startswith("<") and ref.endswith(">"):
+            ref = ref[1:-1]
+        line = line_of(text, match.start())
+        linked += 1
+        target = ref.strip()
+        if not target or target.startswith("#"):
+            continue
+        lower = target.lower()
+        if lower.startswith(REMOTE):
+            continue
+        if SCHEME.match(target):
+            problems.append(f"{doc}:{line}  unsupported link scheme: {target}")
+            continue
+
+        local = urllib.parse.unquote(target.split("#", 1)[0].split("?", 1)[0])
+        if not local:
+            continue
+        if local.startswith("/"):
+            resolved = os.path.normpath(os.path.join(root, local.lstrip("/")))
+        else:
+            resolved = os.path.normpath(os.path.join(os.path.dirname(doc), local))
+
+        # A directory is a valid target: the docs link to `../screenshots` as a whole.
+        if not os.path.isfile(resolved) and not os.path.isdir(resolved):
+            problems.append(f"{doc}:{line}  missing link target: {target}")
+
     for match in REFERENCE.finditer(text):
         problems.append(
             f"{doc}:{line_of(text, match.start())}  reference-style image links are not "
@@ -125,5 +183,8 @@ if problems:
     )
     sys.exit(1)
 
-print(f"verify-doc-images: {checked} image reference(s) across {len(paths)} document(s) all exist.")
+print(
+    f"verify-doc-images: {checked} image reference(s) and {linked} link(s) across "
+    f"{len(paths)} document(s) all resolve."
+)
 PY

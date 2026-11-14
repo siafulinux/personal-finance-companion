@@ -15,6 +15,15 @@
 # horizontal rule is the changelog's entry separator, not part of the notes, so
 # it is stripped before comparing.
 #
+# A published body must also not END with a separator. The changelog's `---` is
+# an entry separator, so one left on the end of a release body is always an
+# accident, and it renders as a stray rule under the notes. That is checked for
+# every release -- annotated bodies included -- and fails whether or not the
+# text otherwise matches its section.
+#
+# PFC_CHANGELOG reads the changelog from another path; scripts/verify-releases-test
+# uses it to exercise these rules against fixtures, offline.
+#
 # Releases whose notes were deliberately extended by hand are listed in
 # ALLOW_EXTRA below and reported as annotated. They are not silently skipped --
 # a new one has to be added here on purpose, and PFC_ALLOW_DRIFT="" enforces the
@@ -30,7 +39,9 @@ ALLOW_EXTRA=(v0.6.0)
 allowed=${PFC_ALLOW_DRIFT-$(printf '%s\n' "${ALLOW_EXTRA[@]}")}
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  # Printed from the whole comment block, so the usage text cannot fall behind
+  # the header when a rule is added to it.
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0"
   exit 2
 }
 
@@ -86,13 +97,15 @@ trap 'rm -rf -- "$work"' EXIT
 # commits, so their tree can hold a different changelog than the release page
 # was generated from. --ref exists for the case where the historic text is what
 # you actually want to compare against.
+changelog=${PFC_CHANGELOG:-CHANGELOG.md}
 if [ -n "$ref" ]; then
   git show "$ref:CHANGELOG.md" >"$work/CHANGELOG.md" 2>/dev/null ||
     fail "cannot read CHANGELOG.md at $ref."
   source=$ref
 else
-  cp CHANGELOG.md "$work/CHANGELOG.md"
-  source="working tree"
+  cp "$changelog" "$work/CHANGELOG.md" 2>/dev/null ||
+    fail "cannot read the changelog at $changelog."
+  source=$changelog
 fi
 
 if [ ${#tags[@]} -eq 0 ]; then
@@ -106,6 +119,7 @@ drift=0
 invalid=0
 matched=0
 annotated=0
+separated=0
 
 for tag in "${tags[@]}"; do
   if ! gh release view "$tag" --repo "$repository" --json body --jq .body \
@@ -124,6 +138,20 @@ import sys
 tag, body_path, changelog_path = sys.argv[1:4]
 version = tag[1:] if tag.startswith("v") else tag
 
+body = pathlib.Path(body_path).read_text(encoding="utf-8").strip()
+
+# Checked before anything else, and before the annotated list is consulted: a
+# trailing rule is never intentional, so no release is allowed to keep one.
+# `-`, `*` and `_` are the three Markdown thematic breaks; the rule may be
+# written with spaces between the characters.
+rule = re.compile(r"^(?:-\s*){3,}$|^(?:\*\s*){3,}$|^(?:_\s*){3,}$")
+last = body.splitlines()[-1].strip() if body else ""
+if rule.match(last):
+    print("TRAILING SEPARATOR")
+    print("the body ends with %r, a Markdown separator rather than notes" % last)
+    print("the changelog's `---` separates entries; strip it from the release body")
+    sys.exit()
+
 lines = pathlib.Path(changelog_path).read_text(encoding="utf-8").splitlines()
 heading = re.compile(r"^## \[([^\]]+)\]")
 starts = [i for i, line in enumerate(lines)
@@ -139,7 +167,6 @@ end = next((j for j in range(start + 1, len(lines)) if heading.match(lines[j])),
 # purpose: if the two ever disagree this check reports drift the workflow
 # itself creates.
 section = re.sub(r"\n\s*-{3,}\s*$", "", "\n".join(lines[start + 1:end])).strip()
-body = pathlib.Path(body_path).read_text(encoding="utf-8").strip()
 
 if section == body:
     print("MATCH")
@@ -162,6 +189,11 @@ PY
       printf '%-10s ok\n' "$tag"
       matched=$((matched + 1))
       ;;
+    TRAILING\ SEPARATOR)
+      printf '%-10s TRAILING SEPARATOR\n' "$tag"
+      printf '%s\n' "$detail" | sed 's/^/             /'
+      separated=$((separated + 1))
+      ;;
     DIFFERS)
       if printf '%s\n' "$allowed" | grep -Fxq -- "$tag"; then
         printf '%-10s ok (annotated by hand, allowed)\n' "$tag"
@@ -183,9 +215,12 @@ PY
   esac
 done
 
-printf '\n%d matched, %d annotated, %d drifted, %d unverifiable (%s, %s)\n' \
-  "$matched" "$annotated" "$drift" "$invalid" "$repository" "$source"
+printf '\n%d matched, %d annotated, %d drifted, %d ending in a separator, %d unverifiable (%s, %s)\n' \
+  "$matched" "$annotated" "$drift" "$separated" "$invalid" "$repository" "$source"
 
+if [ "$separated" -gt 0 ]; then
+  reject "$separated release(s) end with a Markdown separator. Strip it so the note ends on content."
+fi
 if [ "$drift" -gt 0 ]; then
   reject "$drift release(s) disagree with the changelog. Update the note or the changelog so they agree."
 fi

@@ -226,12 +226,21 @@ are deliberately extended by hand (the checksums and artifact details on `v0.6.0
 listed inside the script and reported as annotated rather than skipped; `PFC_ALLOW_DRIFT=""`
 enforces the strict comparison for every release.
 
+One defect is checked separately from the comparison: a body that **ends** with a Markdown
+separator. The changelog's `---` separates entries, so one left on the end of a release body
+is always an accident, and it renders as a stray rule under the notes. That fails for every
+release, including the ones listed as annotated, and it fails even when the text otherwise
+matches its section — a matching body that still ends in a rule is not a correct body.
+
 CI runs it on every push and pull request, inside the required **Web typecheck and tests**
 job — a separate job would go red without blocking a merge. So editing a shipped version's
 changelog section means updating that release's notes in the same change, or the build says
 which pair disagree and why before it lands. A release that cannot be read at all is retried
 twice and then fails, so an API blip does not redden every pull request but an unverified
-release is never reported as verified.
+release is never reported as verified. The rules themselves are covered by
+`./scripts/verify-releases-test`, which runs in the same job ahead of the check: it drives the
+real script against fixture bodies (fake `gh`, fixture changelog, no token), so a rule that
+silently stops firing fails the build instead of quietly passing.
 
 ```bash
 ./scripts/verify-apk ~/Downloads/personal-finance-companion-0.6.4.apk v0.6.4
