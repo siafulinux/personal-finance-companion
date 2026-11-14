@@ -254,8 +254,21 @@ def test_pending_transaction_reconciles_in_place(db, user):
         .one()
     )
     pending_id = pending.id
+    pending_external_id = pending.external_id
     assert pending.reconciled_at is None
-    assert pending.external_id.endswith("pending-001")
+    assert pending_external_id.endswith("pending-001")
+
+    def provider_row_count() -> int:
+        return (
+            db.query(Transaction)
+            .filter(
+                Transaction.user_id == user.id,
+                Transaction.source == TransactionSource.PROVIDER.value,
+            )
+            .count()
+        )
+
+    rows_before = provider_row_count()
 
     advance(link.external_item_id)
     run = sync_link(db, user, link)
@@ -266,13 +279,26 @@ def test_pending_transaction_reconciles_in_place(db, user):
     assert reconciled is not None, "the pending row must be updated, not replaced"
     assert reconciled.status == TransactionStatus.POSTED.value
     assert reconciled.reconciled_at is not None
-    # Reconciliation does not create a second row for the same charge.
+    # Reconciliation does not create a second row for the same charge. The query is
+    # keyed on the charge's provider id, not its amount: the sandbox draws its weekly
+    # grocery totals from $68.40 to $138.40, so some user's history contains a
+    # purchase of exactly $68.42. Counting rows by amount then reported that
+    # unrelated purchase as a duplicate of this charge -- a red build with nothing
+    # wrong in reconciliation, and one that appeared only for those users.
     same = (
         db.query(Transaction)
-        .filter(Transaction.user_id == user.id, Transaction.amount == D("68.42"))
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.external_id == pending_external_id,
+        )
         .all()
     )
-    assert len(same) == 1
+    assert len(same) == 1, f"{pending_external_id} produced more than one row"
+    assert same[0].id == pending_id
+    # The whole row count, not just this charge: the advance adds one purchase
+    # ($74.18 at Whole Foods) and reconciles this one, so anything more means a row
+    # was created rather than updated.
+    assert provider_row_count() == rows_before + 1, "reconciliation created an extra row"
 
 
 def test_provider_removal_deletes_only_provider_rows(db, user):
