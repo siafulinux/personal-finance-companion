@@ -142,7 +142,14 @@ Demo data is visibly marked in both apps and can be removed with `./scripts/app 
 ./scripts/backup-routine     # dump + verify + copy off-site + prune; what pfc-backup.timer runs weekly
 ./scripts/app restore FILE  # restore a dump (replaces current data)
 ./scripts/app doctor        # runtimes, migrations, configuration, ports
+./scripts/verify-release-tag  # fail when the running stack reports a tag older than the newest
 ```
+
+`verify-release-tag` is the smoke check for a deployment: it reads `release_tag` from
+`/server/info` and compares it with the newest tag in the repository, exiting 1 when the stack
+is behind and 2 when it cannot reach it. Point it elsewhere with `--url` or `PFC_SMOKE_URL`,
+and compare against a specific tag with `--tag`. Being *ahead* of every tag is a notice, not a
+failure, so an image built past the last tag does not redden the check.
 
 The backend CLI exposes the same operations directly: `backend/.venv/bin/pfc --help`.
 
