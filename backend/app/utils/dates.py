@@ -28,6 +28,20 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def now_in(timezone_name: str | None, fallback: str = "UTC") -> datetime:
+    """The current instant, expressed in the user's timezone.
+
+    The instant is the same everywhere; only the offset attached to it changes.
+    It matters because callers render this value for a person: a timestamp
+    stamped in UTC shows a user in the Americas a time that can sit on the
+    previous or next calendar day from the one their Safe-to-Spend was computed
+    for, which reads as a bug in the calculation rather than in its label.
+
+    Returns an aware datetime, so nothing downstream has to guess an offset.
+    """
+    return datetime.now(resolve_timezone(timezone_name, fallback))
+
+
 def month_bounds(year: int, month: int) -> tuple[date, date]:
     first = date(year, month, 1)
     last = date(year, month, calendar.monthrange(year, month)[1])

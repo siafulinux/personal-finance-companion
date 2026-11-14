@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from app.utils.dates import utc_now
+from app.utils.dates import now_in
 from app.utils.money import ZERO, clamp_zero, format_money, quantize
 
 
@@ -125,6 +125,10 @@ class SafeToSpendInputs:
     currency: str = "USD"
     last_transaction_date: date | None = None
     as_of: datetime | None = None
+    #: The zone `as_of` is stamped in when the caller does not supply one. It is
+    #: the user's zone, never the host's: this module is pure, so the only clock
+    #: it may read is the one a caller named.
+    timezone: str = "UTC"
 
 
 @dataclass(frozen=True)
@@ -500,7 +504,7 @@ def calculate_safe_to_spend(inputs: SafeToSpendInputs) -> SafeToSpendResult:
 
     return SafeToSpendResult(
         currency=inputs.currency,
-        as_of=inputs.as_of or utc_now(),
+        as_of=inputs.as_of or now_in(inputs.timezone),
         today=inputs.today,
         horizon_end=inputs.horizon_end,
         payday=inputs.payday,
