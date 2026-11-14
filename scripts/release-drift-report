@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Name the release and changelog section behind a failed release-notes check.
+#
+#   ./scripts/verify-releases >out 2>&1 || status=$?
+#   ./scripts/release-drift-report out
+#
+# `verify-releases` prints one line per tag, and only says *what* went wrong
+# (`DRIFT`, `NO CHANGELOG ENTRY`, `TRAILING SEPARATOR`, ...). In a job whose name
+# is "Release notes match the changelog" that is enough, but a step buried in a
+# larger job reports as that job: "Web typecheck and tests" sent readers to the
+# frontend for a fault that lives in a release body. This reads the verifier's
+# output and emits one annotation per broken pair, naming the tag and the
+# `## [<version>]` heading it should have matched, plus a step summary block.
+#
+# Only reporting: the caller keeps the exit status that decides the build, so a
+# reporting bug cannot turn a red night green. Exit codes: 0 reported, 2 the
+# output file could not be read.
+#
+# PFC_CHANGELOG names the changelog the verifier was pointed at, so the message
+# quotes the file actually compared rather than a hardcoded CHANGELOG.md.
+set -euo pipefail
+
+usage() {
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0"
+  exit 2
+}
+
+fail() {
+  printf 'release-drift-report: %s\n' "$*" >&2
+  exit 2
+}
+
+[ $# -eq 1 ] || usage
+case "${1:-}" in -h | --help) usage ;; esac
+
+out=$1
+[ -r "$out" ] || fail "cannot read $out; pass the file holding verify-releases output."
+
+changelog=${PFC_CHANGELOG:-CHANGELOG.md}
+base=$(basename -- "$changelog")
+
+# Every tag line the verifier did not mark `ok`. `ok (annotated by hand,
+# allowed)` is fine: its second field is still `ok`, so the exemption survives.
+rows=$(awk '$1 ~ /^v[0-9]/ && $2 != "ok" {
+  status = $2
+  if ($2 == "NO") status = $2 " " $3 " " $4
+  else if ($2 == "TRAILING") status = $2 " " $3
+  print $1 "\t" status
+}' "$out")
+
+message_for() {
+  tag=$1
+  status=$2
+  section="## [${tag#v}]"
+  case "$status" in
+    DRIFT)
+      printf "The published notes for %s disagree with the '%s' section of %s." \
+        "$tag" "$section" "$base"
+      ;;
+    "NO CHANGELOG ENTRY")
+      printf "The published release %s has no '%s' section in %s to compare against." \
+        "$tag" "$section" "$base"
+      ;;
+    "TRAILING SEPARATOR")
+      printf "The published notes for %s end with a Markdown separator; the '%s' section of %s must end on content." \
+        "$tag" "$section" "$base"
+      ;;
+    UNREADABLE)
+      printf "The published notes for %s could not be read, so they cannot be compared with '%s' in %s." \
+        "$tag" "$section" "$base"
+      ;;
+    "NO RELEASE")
+      printf "No published release matched %s, so it cannot be compared with %s." \
+        "$tag" "$base"
+      ;;
+    *)
+      printf "The published release %s no longer matches its '%s' section in %s." \
+        "$tag" "$section" "$base"
+      ;;
+  esac
+}
+
+if [ -z "$rows" ]; then
+  # The verifier failed without naming a tag: the failure is real, but this
+  # script has nothing to attribute it to, so say so rather than stay silent.
+  echo "::error title=Release notes drift::The release-notes check failed without naming a release, so it could not be reported against a '$base' section; see the log."
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo "### Release notes drifted"
+      echo
+      echo "The release-notes check failed without naming a release, so the pair could not be"
+      echo "reported. The verifier's output is below."
+      echo
+      echo '```'
+      cat "$out"
+      echo '```'
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+  exit 0
+fi
+
+while IFS=$'\t' read -r tag status; do
+  [ -n "$tag" ] || continue
+  reason=$(message_for "$tag" "$status")
+  echo "::error title=Release notes drift ($tag)::$reason"
+done <<<"$rows"
+
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "### Release notes drifted"
+    echo
+    echo "These published releases no longer match their changelog section:"
+    echo
+    while IFS=$'\t' read -r tag status; do
+      [ -n "$tag" ] || continue
+      echo "- \`$tag\` ↔ \`$base\` section \`## [${tag#v}]\` — $(message_for "$tag" "$status")"
+    done <<<"$rows"
+    echo
+    echo "Either edit the release body back to its section, or change the section and"
+    echo "republish the release -- the two have to say the same thing."
+    echo
+    echo '```'
+    cat "$out"
+    echo '```'
+  } >>"$GITHUB_STEP_SUMMARY"
+fi
