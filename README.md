@@ -260,14 +260,25 @@ matches its section — a matching body that still ends in a rule is not a corre
 
 CI runs it on every push and pull request in its own required check, **Release notes match the
 changelog**, so a drifting release page blocks a merge under its own name instead of hiding
-inside the web suite. So editing a shipped version's
-changelog section means updating that release's notes in the same change, or the build says
-which pair disagree and why before it lands. A release that cannot be read at all is retried
+inside the web suite.
+
+The nightly schedule runs that same job, under the same name, so a night that went red only
+because a release body drifted names `Release notes match the changelog` in the job list and
+in the alert issue — not `Web typecheck and tests`. Each broken pair is also annotated where
+the failure is reported, naming the release and the `## [<version>]` heading it should have
+matched, so the cause needs no log reading. None of that decides the build: the annotations
+and the step summary are reporting only, and the verifier's exit status is still what fails
+the job, so a reporting bug cannot turn a red run green.
+
+So editing a shipped version's changelog section means updating that release's notes in the
+same change, or the build says which pair disagree and why before it lands. A release that cannot be read at all is retried
 twice and then fails, so an API blip does not redden every pull request but an unverified
 release is never reported as verified. The rules themselves are covered by
 `./scripts/verify-releases-test`, which runs in the same job ahead of the check: it drives the
 real script against fixture bodies (fake `gh`, fixture changelog, no token), so a rule that
-silently stops firing fails the build instead of quietly passing.
+silently stops firing fails the build instead of quietly passing. `release-drift-report-test`
+does the same for the naming a failure produces, since a message that regressed to something
+generic would still be a green build.
 
 ```bash
 ./scripts/verify-apk ~/Downloads/personal-finance-companion-0.6.4.apk v0.6.4
@@ -302,7 +313,10 @@ next push turns it back on.
 A red night also files an issue. The `Nightly failure alert` job runs only for a failed
 schedule, and updates one open `ci-nightly` issue rather than opening a new one each night:
 a duplicate per red run would bury the same breakage. The issue carries the run link, each
-job's result and the local commands to reproduce it.
+job's result and the local commands to reproduce it. Each job is listed by the name it
+reports under, and when `Release notes match the changelog` is the one that failed the issue
+says what that means — a release body disagreeing with the changelog, fixed by editing one or
+the other, with no application code involved.
 
 The first green night closes it again, with a comment naming the commit and the passing run.
 An issue that outlives its failure is worse than none — it trains whoever reads the list to
