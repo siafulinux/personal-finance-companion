@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -253,7 +254,15 @@ def test_correcting_a_matched_transaction_reverts_the_bill(db, user, prefs, acco
     )
     db.commit()
     assert info["outcome"] == "auto"
-    occurrence = bill.occurrences[0]
+    # A bill can hold more than one occurrence and `Bill.occurrences` has no
+    # order, so `occurrences[0]` is whichever row the database hands back first:
+    # on one run that was the matched occurrence, on the next it was the one after
+    # it, and the assertion below failed a commit whose code had not changed. Ask
+    # for the occurrence the payment actually matched instead.
+    match = db.get(BillPaymentMatch, uuid.UUID(info["match_id"]))
+    assert match is not None
+    occurrence = db.get(BillOccurrence, match.occurrence_id)
+    assert occurrence is not None
     db.refresh(occurrence)
     assert occurrence.paid_amount == D("95.00")
 
