@@ -59,7 +59,13 @@ jobs:
           set -euo pipefail
           version=${TAG#v}
 
+          # The build now declares its version once, as `val appVersionName`, and uses
+          # that for both the manifest and the release notes baked into the APK, so
+          # there is one number to keep right. A literal `versionName` is still read,
+          # so an older branch (or a fork) is checked the same way.
           android=$(sed -n 's/^ *versionName *= *"\([^"]*\)".*/\1/p' \
+            android/app/build.gradle.kts | head -1)
+          [ -n "$android" ] || android=$(sed -n 's/^ *val appVersionName *= *"\([^"]*\)".*/\1/p' \
             android/app/build.gradle.kts | head -1)
           newest=$(grep -oE '^## \[[^]]+\]' CHANGELOG.md | head -1 | sed -E 's/^## \[([^]]+)\]/\1/')
 
@@ -77,7 +83,7 @@ jobs:
 
           status=0
           if [ -z "$android" ]; then
-            echo "::error::Could not read versionName from android/app/build.gradle.kts."
+            echo "::error::Could not read versionName (or val appVersionName) from android/app/build.gradle.kts."
             status=1
           elif [ "$(newer_of "$android" "$version")" != "$android" ]; then
             echo "::error::The Android manifest reports $android, older than this tag $TAG. Bump versionName so an install can be traced to a release."

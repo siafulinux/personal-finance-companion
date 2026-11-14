@@ -105,6 +105,75 @@ val releaseSigning: Map<String, String> = run {
     }
 }
 
+/**
+ * The version this build claims, used by the manifest and by the notes below.
+ *
+ * Declared once so `assets/release-notes.txt` cannot describe a different build
+ * from the one the package manager sees.
+ */
+val appVersionName = "0.6.8"
+val appVersionCode = 13
+
+/**
+ * Release notes carried inside the APK as `assets/release-notes.txt`.
+ *
+ * The APK is the thing people download, and it outlives the page it came from: a
+ * file copied off a phone months later has no sidecar next to it and no release
+ * page in reach. So the notes travel with the build, taken from the `CHANGELOG.md`
+ * section matching this version — the same text the release publishes, so the two
+ * cannot drift while both exist.
+ *
+ * A missing section fails the build. An APK that claims a version no changelog
+ * entry describes would ship the one thing this file exists to prevent, and the tag
+ * gate already refuses a tag whose changelog section is absent.
+ *
+ * The text is generated into the build directory rather than committed: it is
+ * derived entirely from `appVersionName` and the changelog, and a checked-in copy
+ * is a second place for the released notes to be wrong.
+ */
+val releaseNotesDir = layout.buildDirectory.dir("generated/release-notes")
+
+// Written during configuration rather than by a task of its own. The assets source
+// set is read by several task graphs -- asset merging, lint's model, the IDE's
+// import -- and a plain task output would have to be wired as a dependency of each,
+// which Gradle rightly fails the build over when one is missed. Producing the file
+// before any of them exist keeps that whole class of problem away, and it is a
+// handful of lines of text from a file that is already on disk.
+run {
+    val changelog = rootDir.parentFile.resolve("CHANGELOG.md")
+    check(changelog.isFile) {
+        "CHANGELOG.md not found at $changelog; the APK's release notes cannot be built."
+    }
+    val heading = Regex("""^## \[${Regex.escape(appVersionName)}\].*$""")
+    val lines = changelog.readLines()
+    val start = lines.indexOfFirst { heading.matches(it) }
+    check(start >= 0) {
+        "CHANGELOG.md has no `## [$appVersionName]` section, so a build claiming " +
+            "$appVersionName has no release notes. Add the section, or set appVersionName to " +
+            "a version that has one."
+    }
+    val end = (start + 1 until lines.size).firstOrNull { lines[it].startsWith("## [") }
+        ?: lines.size
+    // The changelog separates sections with a `---` rule, usually followed by a blank
+    // line; in a text file that is the last thing the reader sees, so drop both, and
+    // only from the end.
+    val sectionLines = lines.subList(start, end).toMutableList()
+    while (sectionLines.isNotEmpty()) {
+        val last = sectionLines.last().trim()
+        if (last.isEmpty() || last == "---") sectionLines.removeAt(sectionLines.lastIndex) else break
+    }
+
+    val notes = buildString {
+        appendLine("Personal Finance Companion $appVersionName (versionCode $appVersionCode)")
+        appendLine()
+        appendLine("Release notes, from this version's CHANGELOG.md section:")
+        appendLine()
+        appendLine(sectionLines.joinToString("\n").trim())
+    }
+    releaseNotesDir.get().asFile.mkdirs()
+    releaseNotesDir.get().asFile.resolve("release-notes.txt").writeText(notes)
+}
+
 android {
     namespace = "com.pfc.companion"
     compileSdk = 36
@@ -142,8 +211,8 @@ android {
         // 0.6.8: 0.6.7 was merged but never tagged, so the number moved on rather
         // than leaving a build claiming a release that does not exist. 13 is next
         // free; below it sit 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
-        versionCode = 13
-        versionName = "0.6.8"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
@@ -193,6 +262,11 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    // The generated notes directory is an asset source, so they land in every
+    // variant — debug builds and CI's custom-address build included, which is what
+    // makes the file trustworthy rather than a release-only extra.
+    sourceSets.getByName("main").assets.srcDir(releaseNotesDir)
 }
 
 dependencies {
