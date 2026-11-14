@@ -8,6 +8,31 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.9] — 2026-11-14 — a re-pointed tag warns instead of failing
+
+Two commits' worth of release hygiene, cut as the first release whose gate checks itself
+in CI: `scripts/verify-releases-test` runs in the backend job ahead of the drift check, so
+the suite that proves the gate works ran before this tag was allowed to exist.
+
+### Changed
+
+- **A tag re-pointed after its release was published gets a warning, not a red run.** The
+  publish job leaves an existing release alone, so nothing could ship for that tag a second
+  time; the first-publication gates could only fail without changing anything. The release
+  workflow now asks `scripts/release-published` first and stands aside for a tag that
+  already has a release. A tag *without* one still has to pass every check, and the script's
+  exit codes fail closed — a network error is never read as "not published".
+- **The manifest names `0.6.9` / `versionCode` 14.** 13 was the 0.6.8 build; below it sit
+  12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
+
+### Fixed
+
+- **The v0.6.2 changelog note names the commit it was moved off.** The entry recorded that
+  the tag was re-cut but not where it pointed before, so a future revert had no target. The
+  pre-re-cut commit is now written down.
+
+---
+
 ## [0.6.8] — 2026-11-13 — the number catches up with the build
 
 0.6.7 was merged but never tagged, so the build that names it never became a release. This
