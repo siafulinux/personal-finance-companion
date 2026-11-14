@@ -258,8 +258,9 @@ is always an accident, and it renders as a stray rule under the notes. That fail
 release, including the ones listed as annotated, and it fails even when the text otherwise
 matches its section — a matching body that still ends in a rule is not a correct body.
 
-CI runs it on every push and pull request, inside the required **Web typecheck and tests**
-job — a separate job would go red without blocking a merge. So editing a shipped version's
+CI runs it on every push and pull request in its own required check, **Release notes match the
+changelog**, so a drifting release page blocks a merge under its own name instead of hiding
+inside the web suite. So editing a shipped version's
 changelog section means updating that release's notes in the same change, or the build says
 which pair disagree and why before it lands. A release that cannot be read at all is retried
 twice and then fails, so an API blip does not redden every pull request but an unverified
