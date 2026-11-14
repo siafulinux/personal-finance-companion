@@ -33,9 +33,15 @@
 set -euo pipefail
 
 # Releases whose published notes intentionally carry content the changelog does
-# not: the APK checksums and asset details are added after publication, because
-# the signing key stays off CI and the artifact is uploaded by hand.
-ALLOW_EXTRA=(v0.6.0)
+# not:
+#
+#   v0.6.0  checksums and asset details, added after publication because the
+#           signing key stays off CI and the artifact was uploaded by hand.
+#   v0.6.6  an install-order warning. Its versionCode (10) is lower than
+#           v0.6.5's (11), so Android treats it as a downgrade and refuses it
+#           over an installed 0.6.5; the notes say so and name the newest build
+#           to install instead.
+ALLOW_EXTRA=(v0.6.0 v0.6.6)
 allowed=${PFC_ALLOW_DRIFT-$(printf '%s\n' "${ALLOW_EXTRA[@]}")}
 
 usage() {
