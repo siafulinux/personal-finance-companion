@@ -8,6 +8,31 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.10] — 2026-11-14 — Safe-to-Spend stops dating itself from the server
+
+### Fixed
+
+- **Safe-to-Spend's `as_of` is stamped in the user's timezone, not the server's.**
+  `today` already came from the user's calendar, but the result carried a UTC
+  timestamp, so a New York user saw a figure for today labelled "as of" yesterday
+  evening and a Tokyo user saw tomorrow's. Nothing was miscalculated — the label
+  disagreed with the number beside it, which is worse than no label, because the
+  reader cannot tell which one to trust. `now_in()` in `app/utils/dates.py` now
+  produces the same instant with the user's offset attached, and
+  `SafeToSpendInputs` carries that zone so the pure engine's fallback no longer
+  reads a clock of its own. An `as_of` a caller supplies is still kept verbatim.
+- **Three regression tests pin it.** `backend/tests/test_safe_to_spend_as_of.py`
+  covers the service's stamp, the engine's fallback following a named zone
+  (`Asia/Tokyo`, so a host-clock fallback fails on a UTC runner), and an explicit
+  `as_of` surviving untouched.
+
+### Changed
+
+- **The manifest names `0.6.10` / `versionCode` 15.** 14 was the 0.6.9 build; below
+  it sit 13 (0.6.8), 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
+
+---
+
 ## [0.6.9] — 2026-11-14 — a re-pointed tag warns instead of failing
 
 Two commits' worth of release hygiene, cut as the first release whose gate checks itself
