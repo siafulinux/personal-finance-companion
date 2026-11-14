@@ -143,8 +143,9 @@ android {
         // than leaving a build claiming a release that does not exist. 13 is next
         // free; below it sit 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
         // 0.6.9: 14, the next free code -- 13 belongs to the 0.6.8 build.
-        versionCode = 14
-        versionName = "0.6.9"
+        // 0.6.10: 15, so this patch build cannot be mistaken for 0.6.9's install.
+        versionCode = 15
+        versionName = "0.6.10"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
