@@ -39,7 +39,7 @@ from app.services.budgets import budget_category_row
 from app.services.errors import NotFoundError
 from app.services.loans import upcoming_payments
 from app.services.savings import list_goals, planned_contributions, protected_amount
-from app.utils.dates import month_bounds, today_in, utc_now
+from app.utils.dates import month_bounds, now_in, today_in
 from app.utils.money import ZERO, quantize
 
 MAX_STALE_DAYS = 45
@@ -240,7 +240,11 @@ def build_inputs(db: Session, user: User, *, today: date | None = None) -> SafeT
         payday=payday,
         currency=user.currency,
         last_transaction_date=last_transaction_date(db, user.id),
-        as_of=utc_now(),
+        # Stamped in the user's zone rather than the server's, so the "as of" a
+        # client shows cannot name a different day than `today`, which is already
+        # theirs. The instant is identical either way; only the offset differs.
+        as_of=now_in(user.timezone),
+        timezone=user.timezone or "UTC",
     )
 
 
