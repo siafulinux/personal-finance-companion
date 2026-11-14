@@ -233,6 +233,72 @@ def test_complete_link_counts_the_history_window_from_the_institutions_day():
     assert result.history_start == institution_today() - timedelta(days=INITIAL_HISTORY_DAYS)
 
 
+def test_complete_link_counts_the_history_window_from_the_users_day(monkeypatch):
+    """With a user date, Teller's initial depth is counted back from *their* day.
+
+    `history_start` dates every opening balance the first sync writes. Counted from a
+    calendar ahead of the user -- the institution's, or a container on UTC -- the
+    window starts a day into their future, and the sync's "up to today" reads drop
+    exactly the rows it was meant to import. The institution's day is pushed to a date
+    the window cannot accidentally land on, so a fallback fails this assertion rather
+    than happening to pass at certain hours.
+    """
+    from app.providers import teller as teller_module
+    from app.providers.teller import INITIAL_HISTORY_DAYS
+
+    user_day = date(2026, 3, 4)
+    monkeypatch.setattr(
+        teller_module, "institution_today", lambda: user_day + timedelta(days=1)
+    )
+
+    result = _provider(_complete_handler).complete_link(
+        "token_sandbox",
+        {"nonce": issue_nonce("user-9"), "user_id": "usr_1", "enrollment_id": "enr_9"},
+        today=user_day,
+    )
+
+    assert result.history_start == user_day - timedelta(days=INITIAL_HISTORY_DAYS)
+    assert result.history_start != (user_day + timedelta(days=1)) - timedelta(
+        days=INITIAL_HISTORY_DAYS
+    )
+
+
+def test_sync_window_ends_on_the_users_day_not_the_institutions(monkeypatch):
+    """The first sync asks for the user's day, so it cannot fetch their tomorrow.
+
+    The window and the depth must agree: a history counted from the user's day while
+    the first page ends on the institution's would import rows dated after their
+    today, which every "up to today" read then hides.
+    """
+    from app.providers import teller as teller_module
+    from app.providers.teller import INITIAL_HISTORY_DAYS
+    from app.providers.teller import OVERLAP_DAYS
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/accounts":
+            return httpx.Response(200, json=_accounts_payload())
+        return httpx.Response(200, json=[])
+
+    user_day = date(2026, 3, 4)
+    monkeypatch.setattr(
+        teller_module, "institution_today", lambda: user_day + timedelta(days=1)
+    )
+
+    delta = _provider(handler).sync_page("token_abc", cursor=None, today=user_day)
+
+    transaction_requests = [r for r in requests if r.url.path.endswith("/transactions")]
+    assert transaction_requests, "the adapter must ask each account for transactions"
+    params = transaction_requests[0].url.params
+    assert params["end_date"] == user_day.isoformat()
+    assert params["start_date"] == (
+        user_day - timedelta(days=INITIAL_HISTORY_DAYS + OVERLAP_DAYS)
+    ).isoformat()
+    assert delta.next_cursor == f"teller:v1:{user_day.isoformat()}"
+
+
 def test_sync_reads_an_overlapping_window_and_advances_its_cursor():
     requests: list[httpx.Request] = []
 
