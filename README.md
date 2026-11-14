@@ -247,8 +247,9 @@ A release body is generated from the changelog once, and can drift afterwards: n
 on GitHub that the changelog never learned about, or a changelog entry rewritten without
 updating the release. `verify-releases` compares every published body against its section,
 applying the same normalisation the workflow does, and exits `1` on a mismatch. Notes that
-are deliberately extended by hand (the checksums and artifact details on `v0.6.0`) are
-listed inside the script and reported as annotated rather than skipped; `PFC_ALLOW_DRIFT=""`
+are deliberately extended by hand (the checksums and artifact details on `v0.6.0`, the
+install-order warning on `v0.6.6`) are listed inside the script and reported as annotated
+rather than skipped; `PFC_ALLOW_DRIFT=""`
 enforces the strict comparison for every release.
 
 One defect is checked separately from the comparison: a body that **ends** with a Markdown
