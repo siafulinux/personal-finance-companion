@@ -85,8 +85,13 @@ android {
         // 0.6.0: Phase 4 — loans and advances, savings goals, unified obligations,
         // the Safe-to-Spend breakdown, merchant insights and location-aware
         // Shopping Intelligence.
+        // 0.6.3: the release this build's tag names. versionName said 0.6.0 when the
+        // tag was first cut, so an install could not be traced to its release; the
+        // tag is re-cut at this commit so the two agree. versionCode stays 8 -- this
+        // line's historical install number, and 9 through 13 belong to later
+        // releases, so raising it would let an old build outrank the current one.
         versionCode = 8
-        versionName = "0.6.0"
+        versionName = "0.6.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // First-run default only; Settings → Server address overrides it per install.
