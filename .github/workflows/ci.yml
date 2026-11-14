@@ -321,8 +321,15 @@ jobs:
         # passing on a body that ends with `---`, which is exactly the silent
         # return this test exists to prevent. Offline -- fake gh, fixture
         # changelog, no token.
+        #
+        # `release-drift-report-test` covers the naming a scheduled night uses.
+        # It runs here as well as in `release-notes` because this job runs on
+        # every push and pull request, while that one only runs on a schedule: a
+        # regression there would otherwise reach a night before CI saw it.
         working-directory: .
-        run: ./scripts/verify-releases-test
+        run: |
+          ./scripts/verify-releases-test
+          ./scripts/release-drift-report-test
       - name: Check every published release still matches the changelog
         # Also in this job, for the same reason: a standalone job could go red
         # without blocking a merge. A release body is generated from the
@@ -393,9 +400,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Test the release-body checks against fixtures
-        # The same guard the `web` job runs: the naming below is only worth
-        # anything if the check it reports on still enforces its rules.
-        run: ./scripts/verify-releases-test
+        # The same guards the `web` job runs: naming a drift is only worth
+        # anything if the check it reports on still enforces its rules, and if
+        # the naming itself still names the right pair.
+        run: |
+          ./scripts/verify-releases-test
+          ./scripts/release-drift-report-test
       - name: Name every release whose notes no longer match its section
         env:
           GH_TOKEN: ${{ github.token }}
@@ -429,34 +439,11 @@ jobs:
           fi
 
           # One annotation per broken pair, so the summary lists every release
-          # that drifted rather than just the fact that something did.
-          drifted=$(awk '$1 ~ /^v[0-9]/ && ($2 == "DRIFT" || $2 == "NO") { print $1 }' "$out")
-
-          if [ -z "$drifted" ]; then
-            echo "::error title=Release notes drift::A published release body disagrees with CHANGELOG.md; see the log for the release."
-            exit 1
-          fi
-
-          {
-            echo "### Release notes drifted"
-            echo
-            echo "These published releases no longer match their changelog section:"
-            echo
-            for tag in $drifted; do
-              echo "- \`$tag\` ↔ \`CHANGELOG.md\` section \`## [${tag#v}]\`"
-            done
-            echo
-            echo "Either edit the release body back to its section, or change the section and"
-            echo "republish the release -- the two have to say the same thing."
-            echo
-            echo '```'
-            cat "$out"
-            echo '```'
-          } >>"$GITHUB_STEP_SUMMARY"
-
-          for tag in $drifted; do
-            echo "::error title=Release notes drift ($tag)::The published notes for $tag disagree with the '## [${tag#v}]' section of CHANGELOG.md."
-          done
+          # that drifted rather than just the fact that something did. The naming
+          # lives in a script so `release-drift-report-test` can pin it: an inline
+          # awk here could regress to a generic message with nothing failing.
+          # Reporting only -- this step keeps the exit status that fails the job.
+          ./scripts/release-drift-report "$out"
           exit 1
 
   docs:
