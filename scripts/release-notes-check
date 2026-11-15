@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Check every published release against its changelog section, retrying only
+# when the releases could not be read.
+#
+#   scripts/release-notes-check              # every published release
+#   scripts/release-notes-check v0.6.3       # arguments go to verify-releases
+#
+# This is the step CI runs (`Release notes match the changelog`, in the `web` job
+# on every push and under its own name on the nightly schedule), kept here
+# rather than inline so its failure paths can be tested: the retry rule is the
+# part that cannot be seen in a fixture changelog, and an inline copy could lose
+# it without any test noticing.
+#
+# Exit 1 is drift and fails at once -- retrying would only delay the answer.
+# Exit 2 means the releases could not be read (an API blip, a rate limit), which
+# is not drift, so it is retried PFC_RETRY_ATTEMPTS times before being treated as
+# a failure: the check still fails closed, but a single dropped request does not
+# redden every pull request for ten minutes.
+#
+# Every broken pair is then named by scripts/release-drift-report, one annotation
+# per release and changelog section. Reporting only: the exit below is what fails
+# the job, so a reporting bug cannot turn a red run green.
+#
+# PFC_CHECK_BIN runs a different verifier/reporter pair, which is how
+# scripts/release-notes-check-test drives these paths offline. PFC_RETRY_SLEEP
+# (seconds, default 5) and PFC_RETRY_ATTEMPTS (default 3) are the retry policy.
+#
+# Exit codes: 0 verified, 1 drift or still unreadable, 2 cannot run (no verifier).
+set -euo pipefail
+
+usage() {
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0"
+  exit 2
+}
+
+fail() {
+  printf 'release-notes-check: %s\n' "$*" >&2
+  exit 2
+}
+
+case "${1:-}" in
+  -h | --help) usage ;;
+esac
+
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+bindir=${PFC_CHECK_BIN:-$here}
+verify=$bindir/verify-releases
+report=$bindir/release-drift-report
+
+[ -x "$verify" ] || fail "no executable at $verify."
+[ -x "$report" ] || fail "no executable at $report."
+
+attempts=${PFC_RETRY_ATTEMPTS:-3}
+delay=${PFC_RETRY_SLEEP:-5}
+case "$attempts" in
+  '' | *[!0-9]*) fail "PFC_RETRY_ATTEMPTS must be a positive integer, not '$attempts'." ;;
+esac
+[ "$attempts" -ge 1 ] || fail "PFC_RETRY_ATTEMPTS must be at least 1, not '$attempts'."
+case "$delay" in
+  '' | *[!0-9]*) fail "PFC_RETRY_SLEEP must be a whole number of seconds, not '$delay'." ;;
+esac
+
+# Kept in a file rather than a variable: the diff for a drifted release can be
+# long, and it is what a reader needs to see.
+out=$(mktemp)
+trap 'rm -f -- "$out"' EXIT
+
+status=0
+attempt=1
+while [ "$attempt" -le "$attempts" ]; do
+  status=0
+  "$verify" "$@" >"$out" 2>&1 || status=$?
+  [ "$status" -eq 0 ] && break
+  # Only an unreadable answer is worth asking again: drift, or anything else the
+  # verifier reports, will say the same thing on the second attempt.
+  [ "$status" -eq 2 ] || break
+  if [ "$attempt" -lt "$attempts" ]; then
+    echo "::warning::The releases could not be read (attempt $attempt of $attempts); retrying."
+    sleep "$delay"
+  fi
+  attempt=$((attempt + 1))
+done
+
+cat "$out"
+[ "$status" -eq 0 ] && exit 0
+
+if [ "$status" -ne 1 ]; then
+  echo "::error title=Release notes could not be read::The published releases could not be read, so drift cannot be ruled out."
+  exit 1
+fi
+
+# One annotation per broken pair, naming the release and the changelog section,
+# plus a step summary. Reporting only: the exit below is what fails the job, so a
+# reporting bug cannot turn a red run green.
+"$report" "$out"
+echo "::error::A published release no longer matches its changelog section."
+exit 1

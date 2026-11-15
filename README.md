@@ -241,6 +241,7 @@ where the APK is still uploaded by hand.
 
 ```bash
 ./scripts/verify-releases            # does every published release still match the changelog?
+./scripts/release-notes-check       # the same check as CI runs it: retries an unreadable API
 ```
 
 A release body is generated from the changelog once, and can drift afterwards: notes edited
@@ -271,14 +272,24 @@ and the step summary are reporting only, and the verifier's exit status is still
 the job, so a reporting bug cannot turn a red run green.
 
 So editing a shipped version's changelog section means updating that release's notes in the
-same change, or the build says which pair disagree and why before it lands. A release that cannot be read at all is retried
-twice and then fails, so an API blip does not redden every pull request but an unverified
-release is never reported as verified. The rules themselves are covered by
-`./scripts/verify-releases-test`, which runs in the same job ahead of the check: it drives the
-real script against fixture bodies (fake `gh`, fixture changelog, no token), so a rule that
-silently stops firing fails the build instead of quietly passing. `release-drift-report-test`
-does the same for the naming a failure produces, since a message that regressed to something
-generic would still be a green build.
+same change, or the build says which pair disagree and why before it lands.
+
+CI's step is `./scripts/release-notes-check`, which holds the rule the naming does not cover: a
+release that cannot be read at all is retried twice and then fails, so an API blip does not
+redden every pull request but an unverified release is never reported as verified. Drift is
+not retried — it will say the same thing on the second attempt — and a run that runs out of
+attempts still exits `1`, so a night that could not read the releases is red rather than
+unverified-and-green.
+
+All three halves run as fixtures in the same job ahead of the check. `verify-releases-test`
+drives the real comparison against fixture bodies (fake `gh`, fixture changelog, no token), so
+a rule that silently stops firing fails the build instead of quietly passing.
+`release-drift-report-test` does the same for the naming a failure produces, since a message
+that regressed to something generic would still be a green build. `release-notes-check-test`
+stands in for the verifier itself, which is the only way to reach the exit-2 path: it scripts
+unreadable-then-read, unreadable-then-drift and unreadable-throughout, and asserts the number
+of verifier attempts, the retry warnings and whether the drift report ran, so the fail-closed
+ending cannot be dropped without a red build.
 
 ```bash
 ./scripts/verify-apk ~/Downloads/personal-finance-companion-0.6.4.apk v0.6.4
