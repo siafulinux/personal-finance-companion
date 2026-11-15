@@ -111,8 +111,8 @@ val releaseSigning: Map<String, String> = run {
  * Declared once so `assets/release-notes.txt` cannot describe a different build
  * from the one the package manager sees.
  */
-val appVersionName = "0.6.10"
-val appVersionCode = 15
+val appVersionName = "0.6.11"
+val appVersionCode = 16
 
 /**
  * Release notes carried inside the APK as `assets/release-notes.txt`.
