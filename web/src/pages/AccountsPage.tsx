@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { accountTypeLabel, formatDate, formatMoney, todayISO } from "../lib/format";
+import { accountTypeLabel, formatDate, formatMoney, todayInZone } from "../lib/format";
 import type { Account } from "../lib/types";
 import {
   Badge,
@@ -31,11 +31,14 @@ interface AccountForm {
   include_in_safe_to_spend: boolean;
 }
 
-const emptyForm = (): AccountForm => ({
+// The opening date defaults to the *user's* calendar (their profile timezone),
+// not the browser's: an account dated a day early or late is invisible to
+// "up to today" balances and to the forecast until the gap passes.
+const emptyForm = (timezone: string | null | undefined): AccountForm => ({
   name: "",
   account_type: "checking",
   opening_balance: "0.00",
-  opening_balance_date: todayISO(),
+  opening_balance_date: todayInZone(timezone),
   credit_limit: "",
   minimum_payment: "",
   description: "",
@@ -53,7 +56,7 @@ export function AccountsPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
-  const [form, setForm] = useState<AccountForm>(emptyForm());
+  const [form, setForm] = useState<AccountForm>(emptyForm(profile?.user.timezone));
   const [formError, setFormError] = useState<string | null>(null);
   const [adjusting, setAdjusting] = useState<Account | null>(null);
   const [adjustTarget, setAdjustTarget] = useState("");
@@ -97,7 +100,7 @@ export function AccountsPage() {
     onSuccess: () => {
       setFormOpen(false);
       setEditing(null);
-      setForm(emptyForm());
+      setForm(emptyForm(profile?.user.timezone));
       invalidate();
     },
     onError: (err) => setFormError(err instanceof Error ? err.message : "Unable to save account."),
@@ -140,7 +143,7 @@ export function AccountsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm(emptyForm());
+    setForm(emptyForm(profile?.user.timezone));
     setFormError(null);
     setFormOpen(true);
   };
