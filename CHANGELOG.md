@@ -8,6 +8,53 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.11] — 2026-11-14 — every release ships its own signed APK
+
+### Added
+
+- **The release workflow attaches a signed APK and its `.sha256` sidecar.** Until now a
+  release published notes only, and the download was uploaded by hand from whichever machine
+  held the key — so several releases sat complete-looking with nothing to install, and this
+  one would have too. The new `artifact` job builds the tag itself, refuses an unsigned
+  build instead of attaching one, refuses a build signed by any certificate but the pinned
+  release key, names the file from the tag, and reads the sidecar back from the release
+  before reporting success. A fork without the key still publishes notes; a half-configured
+  repository fails loudly rather than looking configured.
+- **Every APK carries its release notes.** `assets/release-notes.txt` holds the changelog
+  section for the version the package claims, so a file copied off a phone months later
+  still says which release it is and what changed, without the release page beside it.
+
+### Changed
+
+- **The Android version is declared once.** `appVersionName` / `appVersionCode` feed
+  `versionName`, `versionCode` and the embedded notes, so the package manager and the notes
+  cannot disagree about which build this is. A missing changelog section fails the build,
+  debug builds included, because an APK that cannot say what it is should not exist. The
+  release workflow reads the new declaration and still accepts the literal form older
+  branches use.
+- **The release-notes check is a job of its own.** "Release notes match the changelog" moved
+  out of the web job, so a drifting release page no longer reports as a frontend failure and
+  the check can be required on its own.
+- **A drift-only night names the pair that drifted.** The nightly alert now needs and lists
+  the release-notes job, and `scripts/release-drift-report` turns the verifier's transcript
+  into one annotation per broken release, naming the tag and the `## [<version>]` heading it
+  should have matched. Reporting only — the verifier's exit status still fails the job.
+- **The manifest names `0.6.11` / `versionCode` 16.** 15 was the 0.6.10 build; below it sit
+  14 (0.6.9), 13 (0.6.8), 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
+
+### Notes
+
+- **The keystore stays out of CI.** The workflow holds a read-only deploy key scoped to one
+  private repository that stores the keystore and its properties, and reads it per run. A
+  workflow log, a fork or a leaked runner therefore exposes no key material, and revoking
+  access is a repository permission rather than a secret rotation.
+- **v0.6.6's release body warns that it cannot be installed over v0.6.5.** It shipped
+  `versionCode` 10 under a higher version name, so the installer sees a downgrade; the notes
+  now say so and point at the newest build. `scripts/verify-releases` lists it beside
+  `v0.6.0` as a release whose body is deliberately extended by hand.
+
+---
+
 ## [0.6.10] — 2026-11-14 — Safe-to-Spend stops dating itself from the server
 
 ### Fixed
