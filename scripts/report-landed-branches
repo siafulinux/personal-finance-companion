@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# Report branches whose content has fully landed on the default branch.
+#
+#   scripts/report-landed-branches                      # origin/master vs every origin/* branch
+#   scripts/report-landed-branches --base master        # any base ref
+#   scripts/report-landed-branches --all-refs           # include local branches, not just origin
+#   scripts/report-landed-branches --summary-file out   # write landed=N / pending=M for a caller
+#   scripts/report-landed-branches --exit-1-if-landed   # for a caller that wants a gate, not a report
+#
+# Why this exists: a branch is not always deleted when its work lands. A squash
+# merge rewrites the commits, so `git branch --merged` reports nothing even though
+# every change is on master; a rebase leaves the original commits behind the same
+# way. The leftovers then sit in the branch list, indistinguishable at a glance
+# from work nobody has merged yet, and the cleanup gets done by hand or not at all.
+#
+# "Landed" here means: every file the branch changes, relative to where it forked,
+# has the same content on the base branch. Two cases fall out of that:
+#
+#   merged   the base already contains every commit on the branch (fast-forward
+#            or merge commit) -- `git log base..branch` is empty.
+#   squashed the branch has commits of its own, but every file it touches is
+#            identical to the base's copy: the work landed under different hashes.
+#
+# Anything else is pending, including a branch that only differs in a file the
+# base later changed back -- that is a real divergence and a human has to look.
+# A branch that changes nothing at all (empty diff against its fork point) is
+# reported as landed, because it genuinely has nothing left to merge.
+#
+# This reports; it never deletes. A branch can be landed by content and still be
+# worth keeping -- a maintenance line, or a tag's support branch.
+#
+# Exit codes: 0 report produced (regardless of findings), 1 with --exit-1-if-landed
+# when at least one branch has landed, 2 cannot check (not a git checkout, bad ref).
+set -euo pipefail
+
+usage() {
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0" >&2
+  exit 2
+}
+
+fail() {
+  printf 'report-landed-branches: %s\n' "$*" >&2
+  exit 2
+}
+
+base=origin/master
+all_refs=0
+summary_file=
+fail_if_landed=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help) usage ;;
+    --base)
+      shift
+      [ $# -gt 0 ] || fail "--base needs a ref."
+      base=$1
+      ;;
+    --base=*) base=${1#*=} ;;
+    --all-refs) all_refs=1 ;;
+    --summary-file)
+      shift
+      [ $# -gt 0 ] || fail "--summary-file needs a path."
+      summary_file=$1
+      ;;
+    --summary-file=*) summary_file=${1#*=} ;;
+    --exit-1-if-landed) fail_if_landed=1 ;;
+    *) fail "unknown argument $1" ;;
+  esac
+  shift
+done
+
+command -v git >/dev/null 2>&1 || fail "git is required."
+git rev-parse --git-dir >/dev/null 2>&1 || fail "not a git checkout."
+git rev-parse --verify --quiet "$base^{commit}" >/dev/null ||
+  fail "no ref $base. Fetch it first (git fetch origin '+refs/heads/*:refs/remotes/origin/*')."
+
+# Self is not a candidate: reporting the default branch as "landed on itself" is noise.
+base_short=$(git rev-parse --short "$base")
+base_name=${base##*/}
+
+if [ "$all_refs" -eq 1 ]; then
+  refs=$(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes)
+else
+  refs=$(git for-each-ref --format='%(refname:short)' refs/remotes)
+fi
+# HEAD symrefs are not branches. Neither is the base under any of its names: with
+# --base master, `origin/master` is the same ref through a longer path, and
+# listing it as a branch that can be deleted would have the report suggest
+# deleting the default branch.
+refs=$(printf '%s\n' "$refs" | grep -v '/HEAD$' | while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  [ "$ref" = "$base" ] && continue
+  [ "${ref##*/}" = "$base_name" ] && continue
+  printf '%s\n' "$ref"
+done || true)
+
+# The same branch appears once as refs/heads/X and once as refs/remotes/origin/X in
+# a normal checkout. Keep the local name and drop the remote duplicate, so the
+# report lists a branch once and its delete command is the obvious one.
+if [ "$all_refs" -eq 1 ]; then
+  refs=$(printf '%s\n' "$refs" | while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    case "$ref" in
+      origin/*)
+        local_ref=${ref#origin/}
+        git rev-parse --verify --quiet "refs/heads/$local_ref" >/dev/null && continue
+        ;;
+    esac
+    printf '%s\n' "$ref"
+  done || true)
+fi
+
+# Compared per path rather than with `git diff --quiet`, because the question is
+# "is this branch's change already there", not "are the two trees the same": a
+# branch that forked a week ago legitimately lacks master's newer, unrelated work.
+blob_of() {
+  git rev-parse --quiet --verify "$1:$2" 2>/dev/null || true
+}
+
+landed_names=()
+landed_rows=()
+pending_rows=()
+landed=0
+pending=0
+
+if [ -n "$refs" ]; then
+  while IFS= read -r branch; do
+    [ -n "$branch" ] || continue
+    git rev-parse --verify --quiet "$branch^{commit}" >/dev/null || continue
+
+    unmerged=$(git rev-list --count "$base..$branch" 2>/dev/null || echo 0)
+    if [ "$unmerged" = "0" ]; then
+      landed=$((landed + 1))
+      landed_names+=("$branch")
+      landed_rows+=("| \`$branch\` | merged | every commit is on $base |")
+      continue
+    fi
+
+    fork=$(git merge-base "$base" "$branch" 2>/dev/null || true)
+    if [ -z "$fork" ]; then
+      pending=$((pending + 1))
+      pending_rows+=("| \`$branch\` | $unmerged | unrelated history |")
+      continue
+    fi
+
+    differing=0
+    changed=0
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      changed=$((changed + 1))
+      [ "$(blob_of "$branch" "$path")" = "$(blob_of "$base" "$path")" ] || differing=$((differing + 1))
+    done < <(git diff --name-only "$fork" "$branch")
+
+    if [ "$changed" -eq 0 ] || [ "$differing" -eq 0 ]; then
+      landed=$((landed + 1))
+      landed_names+=("$branch")
+      landed_rows+=("| \`$branch\` | squashed | $unmerged commit(s), but all $changed file(s) match $base |")
+    else
+      pending=$((pending + 1))
+      pending_rows+=("| \`$branch\` | $unmerged | $differing of $changed file(s) differ |")
+    fi
+  done <<<"$refs"
+fi
+
+printf '## Branches whose work has landed on %s\n\n' "$base"
+printf 'Base: `%s` at `%s`.\n\n' "$base" "$base_short"
+
+if [ "$landed" -gt 0 ]; then
+  printf '### Landed — safe to delete (%d)\n\n' "$landed"
+  printf '| Branch | How | Evidence |\n| --- | --- | --- |\n'
+  printf '%s\n' "${landed_rows[@]}"
+  printf '\nThese are leftovers, not pending work: deleting them loses nothing that is not already on `%s`.\n\n' "$base"
+  printf '```bash\n'
+  # The ref is reported as `origin/foo` because that is how it exists in a
+  # checkout, but `git push --delete` wants the branch name alone: passing the
+  # remote prefix deletes a branch literally called `origin/foo`, or nothing.
+  remote=${base%%/*}
+  [ "$remote" = "$base" ] && remote=origin
+  for name in "${landed_names[@]}"; do
+    printf 'git push %s --delete %s\n' "$remote" "${name#"$remote"/}"
+  done
+  printf '```\n\n'
+else
+  printf '### Landed — safe to delete (0)\n\n'
+  printf 'No branch has fully landed work waiting to be cleaned up.\n\n'
+fi
+
+if [ "$pending" -gt 0 ]; then
+  printf '### Pending — still has unmerged content (%d)\n\n' "$pending"
+  printf '| Branch | Commits not on base | Difference |\n| --- | --- | --- |\n'
+  printf '%s\n' "${pending_rows[@]}"
+  printf '\nLeft alone by this report: these may be work in progress, or a maintenance line that is meant to stay separate.\n'
+else
+  printf '### Pending — still has unmerged content (0)\n\n'
+  printf 'Every branch is either the base or already landed.\n'
+fi
+
+if [ -n "$summary_file" ]; then
+  printf 'landed=%s\npending=%s\n' "$landed" "$pending" >"$summary_file"
+fi
+
+if [ "$fail_if_landed" -eq 1 ] && [ "$landed" -gt 0 ]; then
+  exit 1
+fi
+exit 0

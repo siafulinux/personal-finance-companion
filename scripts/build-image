@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Build the API image with a release tag -- but only when that tag is the commit
+# being built.
+#
+#   scripts/build-image v0.6.8              # verify, then build api and worker
+#   scripts/build-image v0.6.8 --check      # verify only, build nothing
+#   scripts/build-image v0.6.8 api          # verify, then build one service
+#   scripts/build-image                     # tag from `git describe --exact-match`
+#
+# The image bakes its release tag in and `/server/info` reports it, so the tag is
+# a claim about the code inside the image. Compose can only pass a string; it has
+# no way to know whether that string names this commit, which is how a newer tree
+# ends up shipped under an older tag. This script does the check, then builds with
+# `PFC_IMAGE_TAG` set to the tag it just verified -- the same variable compose
+# reads for the image name and the `PFC_RELEASE_TAG` build arg, so the image is
+# tagged and stamped as the release it was verified against. Without it, compose
+# falls back to its default tag and the build would name itself something else.
+#
+# Refused (exit 1):
+#   - no tag given or resolvable, or the tag does not exist
+#   - the tag points at a commit other than HEAD -- newer code, older label
+#   - tracked files have uncommitted changes -- code that is in no commit at all
+# Untracked files are counted and reported but do not refuse: they are usually
+# notes or captures, and `docker build` only sends the ones git does not ignore.
+#
+# Exit codes: 0 verified (and built, unless --check), 1 refused, 2 cannot check
+# (not a git checkout, no docker for a build).
+set -euo pipefail
+
+usage() {
+  awk 'NR > 1 { if ($0 ~ /^set -euo/) exit; sub(/^# ?/, ""); print }' "$0"
+  exit 2
+}
+
+refuse() {
+  printf 'build-image: %s\n' "$*" >&2
+  exit 1
+}
+
+fail() {
+  printf 'build-image: %s\n' "$*" >&2
+  exit 2
+}
+
+check_only=0
+tag=
+services=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help) usage ;;
+    --check | --verify-only) check_only=1 ;;
+    -*)
+      printf 'build-image: unknown option %s\n' "$1" >&2
+      usage
+      ;;
+    *)
+      if [ -z "$tag" ]; then
+        tag=$1
+      else
+        services+=("$1")
+      fi
+      ;;
+  esac
+  shift
+done
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd -- "$root"
+
+command -v git >/dev/null 2>&1 || fail "git is required to resolve the tag."
+git rev-parse --git-dir >/dev/null 2>&1 || fail "not a git checkout, so no tag can be verified."
+
+if [ -z "$tag" ]; then
+  tag=$(git describe --tags --exact-match 2>/dev/null) ||
+    refuse "no tag given and HEAD is not an exact tag. Pass the release tag explicitly: scripts/build-image v0.6.8"
+fi
+
+case "$tag" in
+  v[0-9]*) ;;
+  *)
+    refuse "$tag is not a release tag (they look like v1.2.3). A dev or image tag is not a release: leave PFC_RELEASE_TAG empty for those builds so /server/info reports null."
+    ;;
+esac
+
+tag_commit=$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}" || true)
+[ -n "$tag_commit" ] ||
+  refuse "no tag $tag in this checkout, so there is no commit for the image to name."
+
+head=$(git rev-parse HEAD)
+if [ "$tag_commit" != "$head" ]; then
+  refuse "refusing to stamp $tag: the tag points at $(git rev-parse --short "$tag_commit"), but this tree is $(git rev-parse --short "$head"). That would ship newer code under an older tag. Tag the commit you mean to release, or build the tagged commit."
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  printf 'build-image: tracked files differ from %s:\n' "$(git rev-parse --short "$head")" >&2
+  git --no-pager diff --name-only HEAD >&2
+  refuse "refusing to stamp $tag on a tree that is not the tagged commit. Commit, or build from a clean checkout of $tag."
+fi
+
+untracked=$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')
+if [ "$untracked" != "0" ]; then
+  printf 'build-image: note: %s untracked file(s) will be sent to the build context unless ignored.\n' "$untracked" >&2
+fi
+
+if [ "$check_only" -eq 1 ]; then
+  printf 'build-image: %s is %s, and the tree is clean. This build may stamp it.\n' \
+    "$tag" "$(git rev-parse --short "$head")"
+  exit 0
+fi
+
+command -v docker >/dev/null 2>&1 || fail "docker is required to build; use --check to verify only."
+
+[ ${#services[@]} -gt 0 ] || services=(api worker)
+
+stamp=deploy/docker/release-stamp
+# A record of what was verified for this build, and removed however this script
+# exits: a stamp left behind would describe a build that was never checked.
+umask 077
+printf '%s\n%s\n' "$tag" "$head" >"$stamp"
+trap 'rm -f -- "$stamp"' EXIT INT TERM
+
+printf 'build-image: building %s as %s (%s)\n' "${services[*]}" "$tag" "$(git rev-parse --short "$head")"
+# Compose names the image and fills the build arg from PFC_IMAGE_TAG, so the
+# verified tag has to become that variable; PFC_RELEASE_TAG on its own would not
+# reach the image and the build would fall back to the default tag.
+PFC_IMAGE_TAG="${tag#v}" PFC_RELEASE_TAG="$tag" PFC_RELEASE_COMMIT="$head" \
+  docker compose -f deploy/docker/compose.yaml build "${services[@]}"
