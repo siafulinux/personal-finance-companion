@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# Regression tests for scripts/release-notes-check, focused on the retry rule:
+# drift fails immediately, an unreadable answer is asked again, and a night that
+# is still unreadable fails closed without pretending nothing drifted.
+#
+#   scripts/release-notes-check-test
+#
+# The fixture tests next door (verify-releases-test, release-drift-report-test)
+# only exercise the naming half: they answer successfully or with drift, so the
+# exit-2 path -- an API blip, a rate limit -- is never taken. That is the half
+# that could be dropped without any changelog fixture noticing, which is why it
+# is tested here by standing in for the verifier rather than for the API.
+#
+# PFC_RETRY_SLEEP=0 keeps the retries instant; only the counts and the messages
+# are asserted, not the delay.
+#
+#   case                                                  exit  verifier report
+#   1  read first time                                     0      1        0
+#   2  drift                                               1      1        1
+#   3  unreadable three times                              1      3        0
+#   4  unreadable, then read                               0      2        0
+#   5  unreadable twice, then drift                        1      3        1
+#   6  unreadable with one attempt allowed                 1      1        0
+#   7  unreadable twice, read on the last attempt          0      3        0
+#   8  PFC_RETRY_ATTEMPTS is not a number                  2      0        0
+#
+# Exit codes: 0 every case behaves as intended, 1 a case regressed,
+# 2 cannot run (no mktemp/work directory).
+set -euo pipefail
+
+fail() {
+  printf 'release-notes-check-test: %s\n' "$*" >&2
+  exit 2
+}
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+check=$root/scripts/release-notes-check
+[ -f "$check" ] || fail "no script at $check."
+
+work=$(mktemp -d) || fail "cannot create a work directory."
+trap 'rm -rf -- "$work"' EXIT
+
+calls=$work/calls
+reports=$work/reports
+plan=$work/plan
+: >"$calls"
+: >"$reports"
+
+# --- stand-ins for the verifier and the reporter ------------------------------
+
+mkdir -p "$work/bin"
+cat >"$work/bin/verify-releases" <<'FAKE'
+#!/usr/bin/env bash
+# Records the call, prints a marker, and exits with the next planned code so a
+# caller can script "unreadable, unreadable, drift".
+set -euo pipefail
+done_calls=0
+[ -s "${FAKE_CALLS:?}" ] && done_calls=$(wc -l <"$FAKE_CALLS")
+echo "verify" >>"$FAKE_CALLS"
+code=$(sed -n "$((done_calls + 1))p" "${FAKE_PLAN:?}")
+[ -n "$code" ] || code=0
+echo "fixture verifier output on attempt $((done_calls + 1))"
+[ "$code" = 2 ] && echo "fixture verifier: the releases could not be read" >&2
+exit "$code"
+FAKE
+
+cat >"$work/bin/release-drift-report" <<'FAKE'
+#!/usr/bin/env bash
+# The real report names each broken pair from the verifier's output file; here it
+# only has to prove it ran, with a readable file, after the retries settled.
+set -euo pipefail
+echo "report $1" >>"${FAKE_REPORTS:?}"
+[ -r "$1" ] || { echo "fixture report: cannot read $1" >&2; exit 2; }
+grep -q "fixture verifier output" "$1" || { echo "fixture report: no verifier output" >&2; exit 2; }
+echo "fixture drift report"
+FAKE
+
+chmod +x "$work/bin/verify-releases" "$work/bin/release-drift-report"
+
+# --- the cases ---------------------------------------------------------------
+
+passed=0
+failed=0
+plan_codes=
+attempts_env=3
+
+# run_case <label> <expected-exit> <verify-calls> <report-calls> <required> <forbidden>
+run_case() {
+  label=$1
+  expected=$2
+  want_verify=$3
+  want_report=$4
+  required=$5
+  forbidden=${6:-}
+
+  : >"$calls"
+  : >"$reports"
+  printf '%s\n' "$plan_codes" >"$plan"
+
+  output=
+  status=0
+  output=$(PFC_CHECK_BIN="$work/bin" PFC_RETRY_SLEEP=0 PFC_RETRY_ATTEMPTS="$attempts_env" \
+    FAKE_PLAN="$plan" FAKE_CALLS="$calls" FAKE_REPORTS="$reports" \
+    bash "$check" 2>&1) || status=$?
+
+  got_verify=$(grep -c '^verify$' "$calls" || true)
+  got_report=$(grep -c '^report ' "$reports" || true)
+
+  problem=
+  if [ "$status" -ne "$expected" ]; then
+    problem="exit $status, expected $expected"
+  elif [ "$got_verify" -ne "$want_verify" ]; then
+    problem="$got_verify verifier call(s), expected $want_verify"
+  elif [ "$got_report" -ne "$want_report" ]; then
+    problem="$got_report drift report call(s), expected $want_report"
+  elif [ -n "$required" ] && ! printf '%s' "$output" | grep -Fq -- "$required"; then
+    problem="output does not say \"$required\""
+  elif [ -n "$forbidden" ] && printf '%s' "$output" | grep -Fq -- "$forbidden"; then
+    problem="output should not say \"$forbidden\""
+  fi
+
+  if [ -n "$problem" ]; then
+    failed=$((failed + 1))
+    printf '  %-52s FAIL  %s\n' "$label" "$problem"
+    printf '%s\n' "$output" | sed 's/^/      | /'
+  else
+    passed=$((passed + 1))
+    printf '  %-52s ok    (exit %s, %s verifier, %s report)\n' \
+      "$label" "$status" "$got_verify" "$got_report"
+  fi
+}
+
+printf 'release-notes-check-test: %s\n\n' \
+  "$(cd "$root" && git rev-parse --short HEAD 2>/dev/null || echo no-git)"
+
+plan_codes="0"
+run_case "1. read on the first attempt" 0 1 0 "fixture verifier output" \
+  "could not be read"
+
+plan_codes="1"
+run_case "2. drift fails at once, and is named" 1 1 1 \
+  "A published release no longer matches its changelog section." "retrying"
+
+plan_codes=$'2\n2\n2'
+run_case "3. unreadable three times fails closed" 1 3 0 \
+  "Release notes could not be read" "fixture drift report"
+
+plan_codes=$'2\n0'
+run_case "4. unreadable, then read" 0 2 0 "attempt 1 of 3" \
+  "Release notes could not be read"
+
+plan_codes=$'2\n2\n1'
+run_case "5. unreadable twice, then drift" 1 3 1 "fixture drift report" ""
+
+plan_codes="2"
+attempts_env=1
+run_case "6. one attempt allowed: no retry, still fails closed" 1 1 0 \
+  "Release notes could not be read" "retrying"
+
+attempts_env=3
+plan_codes=$'2\n2\n0'
+run_case "7. read on the last allowed attempt" 0 3 0 "attempt 2 of 3" ""
+
+plan_codes="0"
+attempts_env=not-a-number
+run_case "8. a non-numeric retry budget is refused" 2 0 0 \
+  "PFC_RETRY_ATTEMPTS must be a positive integer" ""
+
+# The retry warnings have to count the attempts that actually happened: a run
+# that retried once must not claim "1 of 3" twice, nor skip the warning that
+# tells the reader a dropped request, not drift, is why the build took longer.
+attempts_env=3
+plan_codes=$'2\n2\n2'
+: >"$calls"
+printf '%s\n' "$plan_codes" >"$plan"
+warnings=$(PFC_CHECK_BIN="$work/bin" PFC_RETRY_SLEEP=0 PFC_RETRY_ATTEMPTS=3 \
+  FAKE_PLAN="$plan" FAKE_CALLS="$calls" FAKE_REPORTS="$reports" \
+  bash "$check" 2>&1 | grep -c '^::warning::The releases could not be read' || true)
+if [ "$warnings" = "2" ]; then
+  passed=$((passed + 1))
+  printf '  %-52s ok    (2 warnings for 3 attempts)\n' "9. one warning per retry, not per attempt"
+else
+  failed=$((failed + 1))
+  printf '  %-52s FAIL  %s warnings, expected 2\n' \
+    "9. one warning per retry, not per attempt" "$warnings"
+fi
+
+printf '\n%d passed, %d failed\n' "$passed" "$failed"
+if [ "$failed" -gt 0 ]; then
+  printf 'release-notes-check-test: %d case(s) regressed.\n' "$failed" >&2
+  exit 1
+fi
+printf 'release-notes-check-test: every case behaves as intended.\n'
