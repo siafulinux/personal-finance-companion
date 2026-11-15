@@ -111,8 +111,8 @@ val releaseSigning: Map<String, String> = run {
  * Declared once so `assets/release-notes.txt` cannot describe a different build
  * from the one the package manager sees.
  */
-val appVersionName = "0.6.11"
-val appVersionCode = 16
+val appVersionName = "0.6.12"
+val appVersionCode = 17
 
 /**
  * Release notes carried inside the APK as `assets/release-notes.txt`.
@@ -214,6 +214,8 @@ android {
         // 0.6.9: 14, the next free code -- 13 belongs to the 0.6.8 build.
         // 0.6.10: 15, so this patch build cannot be mistaken for 0.6.9's install.
         // 0.6.11: 16, the next free code -- 15 belongs to the 0.6.10 build.
+        // 0.6.12: 17, a documentation patch -- 16 belongs to the 0.6.11 install;
+        // no app code changed, only the changelog the build embeds.
         //
         // The two lines below are the only place the version is set. 0.6.10's
         // release commit left a literal `versionName = "0.6.10"` pair above them,

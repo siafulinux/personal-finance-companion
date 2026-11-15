@@ -8,6 +8,24 @@ Android manifest and API metadata. Format follows [Keep a Changelog](https://kee
 
 ---
 
+## [0.6.12] — 2026-11-15 — the 0.6.8 notes name their own fix
+
+A documentation patch. No application code changed: the build is the 0.6.11 tree, and the
+only thing a downloader sees differently is the install number.
+
+### Changed
+
+- **The 0.6.8 entry names the cooldown fix directly.** Its notes said it superseded 0.6.7 and
+  that the section below described everything the build carried, which left anyone reading
+  the 0.6.8 page to open another release to learn that two visits recorded in the same second
+  no longer double-notify. The fix now sits under 0.6.8's own `Fixed` heading, and the
+  published v0.6.8 notes were regenerated from the corrected section, so the release page and
+  the repository agree again.
+- **The manifest names `0.6.12` / `versionCode` 17.** 16 belongs to the 0.6.11 install, and
+  the tag gate refuses a manifest older than the tag it is cut for.
+
+---
+
 ## [0.6.11] — 2026-11-14 — every release ships its own signed APK
 
 ### Added
@@ -111,6 +129,13 @@ the suite that proves the gate works ran before this tag was allowed to exist.
 entry supersedes it: no code changed between the two, and the section below still describes
 everything the build carries. What changes here is only the number, so a build can no longer
 claim a version that has no release behind it.
+
+### Fixed
+
+- **Two visits recorded at the same instant no longer double-notify.** Listed here as well as
+  in 0.6.7, because this is the section a 0.6.8 download shows: the cooldown query compared
+  against a strictly earlier visit, so a second detection in the same second was not
+  suppressed and a second notification went out.
 
 ### Changed
 
