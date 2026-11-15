@@ -338,7 +338,10 @@ does, because an unverified night is not a verified one.
 The nightly can only catch a calendar bug on the night it is that date, so a separate job
 moves the clock instead. **`Backend on a shifted clock`** runs the backend suite three
 times under `libfaketime` — on the leap day (2028-02-29), at 02:00 UTC on the 1st of a month
-(still the 30th in the Americas), and across February into March. A fixture that assumes a
+(still the 30th in the Americas), and across February into March — and **`Web on a shifted
+clock`** repeats those three dates on the web suite, because the same dates are then
+formatted for a person: a month heading, "Due today" or a calendar grid that reads the real
+clock disagrees with the engine on exactly the day the shift is testing. A fixture that assumes a
 30-day November, builds a date by month/day arithmetic, or reads the container's UTC date
 while the user's local date is the previous month fails on an ordinary Tuesday rather than
 on the day it matters.

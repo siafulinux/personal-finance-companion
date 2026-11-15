@@ -329,6 +329,78 @@ jobs:
       - name: Run tests
         run: npm test
 
+  web-calendar:
+    name: Web on a shifted clock (${{ matrix.why }})
+    # The backend proves its date arithmetic on a shifted clock; the pages then
+    # format those dates for a person -- month headings, "Due today", the
+    # calendar grid -- and a formatter that reads the real clock disagrees with
+    # the engine on exactly the days this suite is about. Same three dates, same
+    # preload, so the UI is tested on the calendar the engine is tested on.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - why: leap day 2028-02-29
+            today: "2028-02-29 12:00:00"
+          - why: month end at UTC midnight
+            today: "2028-12-01 02:00:00"
+          - why: month end after the leap day
+            today: "2027-03-01 03:00:00"
+    env:
+      TODAY: ${{ matrix.today }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install libfaketime
+        # Preloaded by path rather than through the `faketime` wrapper: the
+        # wrapper prints a warning and runs with the real clock when the library
+        # is missing, which is a green job that proved nothing.
+        working-directory: .
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends faketime ||
+            sudo apt-get install -y --no-install-recommends libfaketime1
+          lib=$(ls /usr/lib/*/faketime/libfaketime.so.1 2>/dev/null | head -1)
+          if [ -z "$lib" ]; then
+            echo "::error::libfaketime.so.1 is not installed, so the clock cannot be shifted."
+            exit 1
+          fi
+          echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
+          echo "Resolved $lib"
+      - name: Install dependencies
+        run: npm ci
+      - name: Prove the clock shifted
+        # The same fail-closed check the backend job makes, on the runtime this
+        # job actually tests with -- and src/test/clockShift.test.ts repeats it
+        # inside the suite, so a preload that covers this one node process but
+        # not the workers running the tests still fails the build.
+        working-directory: .
+        run: |
+          set -euo pipefail
+          want=${TODAY%% *}
+          shifted=$(LD_PRELOAD="$FAKETIME_LIB" FAKETIME="@$TODAY" FAKETIME_DONT_FAKE_MONOTONIC=1 \
+            node -e 'console.log(new Date().toISOString().slice(0, 10))')
+          echo "real UTC date:    $(date -u '+%Y-%m-%d')"
+          echo "shifted UTC date: $shifted  (wanted $want)"
+          if [ "$shifted" != "$want" ]; then
+            echo "::error::The clock is $shifted, not $want, so this job would have tested today's date and proved nothing."
+            exit 1
+          fi
+      - name: Run tests with the clock shifted
+        run: |
+          set -euo pipefail
+          LD_PRELOAD="$FAKETIME_LIB" FAKETIME="@$TODAY" FAKETIME_DONT_FAKE_MONOTONIC=1 npm test
+
   docs:
     name: Documented images and links
     # Its own job so the documentation check owns its status: it is a required
