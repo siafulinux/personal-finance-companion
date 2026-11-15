@@ -213,8 +213,13 @@ android {
         // free; below it sit 12 (0.6.7), 11 (0.6.0.1) and 9 (0.6.2).
         // 0.6.9: 14, the next free code -- 13 belongs to the 0.6.8 build.
         // 0.6.10: 15, so this patch build cannot be mistaken for 0.6.9's install.
-        versionCode = 15
-        versionName = "0.6.10"
+        // 0.6.11: 16, the next free code -- 15 belongs to the 0.6.10 build.
+        //
+        // The two lines below are the only place the version is set. 0.6.10's
+        // release commit left a literal `versionName = "0.6.10"` pair above them,
+        // which the build overwrote but the release workflow's tag gate read
+        // first, so v0.6.11 was refused against its own manifest. Nothing here
+        // may restate the version.
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
