@@ -131,13 +131,17 @@ def today(user) -> date:
 
 
 @pytest.fixture
-def account(db, user) -> FinancialAccount:
+def account(db, user, today) -> FinancialAccount:
+    # Dated from the user's calendar, like the service does: seeding it from
+    # `date.today()` gives a fixture on the host's day, which on CI's shifted
+    # clock -- or for a user in another zone -- is a day the engine disagrees
+    # with, so an account is opened "in the future" and drops out of balances.
     row = FinancialAccount(
         user_id=user.id,
         name="Everyday Checking",
         account_type=AccountType.CHECKING.value,
         opening_balance=Decimal("900.00"),
-        opening_balance_date=date.today() - timedelta(days=60),
+        opening_balance_date=today - timedelta(days=60),
         include_in_safe_to_spend=True,
     )
     db.add(row)

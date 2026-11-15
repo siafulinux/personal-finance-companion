@@ -226,7 +226,11 @@ def test_virtual_savings_reduce_safe_to_spend_once(db, user, account, prefs):
     assert before - after == Decimal("200.00")
 
     payload = savings_service.goal_payload(
-        db, goal, today=today_in(user.timezone), balances={account.id: None}
+        db,
+        goal,
+        today=today_in(user.timezone),
+        balances={account.id: None},
+        timezone=user.timezone,
     )
     assert payload["protected_amount"] == Decimal("200.00")
     assert payload["progress_percent"] == Decimal("20.00")
@@ -264,6 +268,18 @@ def test_contribution_schedule_starts_on_the_goals_local_day(db, user):
     assert savings_service.next_contribution_date(
         goal, today, timezone="America/New_York"
     ) == date(2026, 3, 24)
+
+
+def test_the_contribution_schedule_cannot_borrow_the_servers_timezone():
+    """The zone is a required argument, not something that defaults to UTC.
+
+    A default resolved the schedule in the host's calendar, which is the day the
+    user is not on for part of every day -- the bug the New York/UTC test above
+    pins. Keeping the parameter mandatory means a new caller has to name the
+    user's zone instead of inheriting the server's.
+    """
+    with pytest.raises(TypeError):
+        savings_service.next_contribution_date(None, date(2026, 3, 20))  # type: ignore[call-arg]
 
 
 def test_account_backed_savings_in_an_excluded_account_are_not_deducted_twice(db, user, prefs):

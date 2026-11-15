@@ -65,9 +65,15 @@ def _account(db: Session, user_id: uuid.UUID, account_id: uuid.UUID | None) -> F
     return account
 
 
-def next_contribution_date(
-    goal: SavingsGoal, today: date, *, timezone: str | None = None
-) -> date | None:
+def next_contribution_date(goal: SavingsGoal, today: date, *, timezone: str) -> date | None:
+    """When the next planned contribution falls due, in the user's calendar.
+
+    ``timezone`` is required rather than defaulted: the schedule is counted from
+    ``created_at``, a UTC timestamp, and an unset zone silently resolved to UTC --
+    the server's day -- putting the first contribution a day late for a user in
+    the Americas and every cycle after it. A caller that does not know the zone
+    has to say so at the call site instead of inheriting the host's.
+    """
     if goal.contribution_amount is None or goal.contribution_frequency is None:
         return None
     last = max((c.contributed_on for c in goal.contributions), default=None)
@@ -109,7 +115,7 @@ def goal_payload(
     *,
     today: date,
     balances: dict,
-    timezone: str | None = None,
+    timezone: str,
 ) -> dict[str, object]:
     account = db.get(FinancialAccount, goal.account_id) if goal.account_id else None
     account_balance = None
