@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useTheme, type ThemeChoice } from "../context/ThemeContext";
 import { api } from "../lib/api";
 import { PasswordForm } from "../components/PasswordForm";
-import { formatMoney } from "../lib/format";
+import { formatMoney, todayISO } from "../lib/format";
 import type { Category, IncomeSource } from "../lib/types";
 import {
   Badge,
@@ -165,7 +165,9 @@ export function SettingsPage() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `finance-export-${new Date().toISOString().slice(0, 10)}.json`;
+      // A local date, like every other date the UI shows: toISOString() is UTC,
+      // which names a file for tomorrow for anyone west of Greenwich after 16:00.
+      anchor.download = `finance-export-${todayISO()}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
     } finally {
