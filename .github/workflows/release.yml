@@ -434,9 +434,22 @@ jobs:
             echo "::error::$apk does not verify: its signature is missing or broken."
             exit 1
           }
-          signer_sha=$(printf '%s\n' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          # apksigner's wording moves between build-tools releases: 36.x prints
+          # "Signer #1 certificate SHA-256 digest: ...", newer ones print
+          # "V2 Signer: certificate SHA-256 digest: ...". Matching the old line
+          # verbatim made the first release that ever ran this job report a
+          # correctly signed APK as having "no readable signing certificate" --
+          # the signature was fine, the parser was not. Match the digest label
+          # itself rather than the signer prefix, which is the part that names
+          # the scheme.
+          signer_sha=$(printf '%s\n' "$certs" \
+            | sed -n 's/^.*certificate SHA-256 digest: //p' \
+            | head -1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
           [ -n "$signer_sha" ] || {
-            echo "::error::$apk has no readable signing certificate."
+            # Print the transcript so the next change in wording is visible in the
+            # log. Still a failure: an unreadable certificate is not a pass.
+            echo "::error::$apk has no readable signing certificate. apksigner said:"
+            printf '%s\n' "$certs"
             exit 1
           }
 
