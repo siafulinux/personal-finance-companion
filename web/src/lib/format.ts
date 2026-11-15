@@ -32,6 +32,37 @@ export function todayISO(): string {
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
 
+/**
+ * The user's calendar date, read in their configured timezone.
+ *
+ * Defaults a date field to the calendar the engine uses. `todayISO()` reads the
+ * device instead, which is the same thing only while the browser and the profile
+ * agree: a laptop set to another zone, or a clock that is simply wrong, would
+ * date a new account into the user's future or past, where every "up to today"
+ * balance and forecast leaves it out. The server falls back to the same
+ * timezone (`today_in(user.timezone)`) when a client sends no date at all, so
+ * this keeps an explicit default agreeing with that fallback instead of
+ * overriding it.
+ *
+ * An unknown or missing zone falls back to the device's local date: the field is
+ * editable, and a wrong default is better than no date.
+ */
+export function todayInZone(timezone: string | null | undefined): string {
+  const zone = timezone?.trim();
+  if (!zone) return todayISO();
+  try {
+    // en-CA formats as YYYY-MM-DD, the value an <input type="date"> holds.
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return todayISO();
+  }
+}
+
 export function formatDate(value: string | null | undefined, opts?: Intl.DateTimeFormatOptions): string {
   if (!value) return "—";
   // `dateStyle`/`timeStyle` are whole-format presets and cannot be combined with

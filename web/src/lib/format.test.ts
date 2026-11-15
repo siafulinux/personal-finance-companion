@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   daysBetween,
   formatDate,
@@ -7,6 +7,8 @@ import {
   formatSignedMoney,
   parseMonth,
   relativeDueLabel,
+  todayISO,
+  todayInZone,
 } from "./format";
 
 describe("money formatting", () => {
@@ -53,6 +55,32 @@ describe("date helpers", () => {
     expect(formatDate(null)).toBe("—");
   });
 
+  it("reads the user's calendar, not the device's, when a zone is known", () => {
+    vi.useFakeTimers();
+    // 18:30 in Los Angeles is already the next day in UTC, so a device-clock
+    // default would date a new account on a day the user has not reached yet.
+    vi.setSystemTime(new Date("2026-11-15T02:30:00Z"));
+    expect(todayInZone("UTC")).toBe("2026-11-15");
+    expect(todayInZone("America/Los_Angeles")).toBe("2026-11-14");
+    expect(todayInZone("Asia/Tokyo")).toBe("2026-11-15");
+
+    // And the other direction: 22:30 UTC is already the 15th in Kiritimati.
+    vi.setSystemTime(new Date("2026-11-14T22:30:00Z"));
+    expect(todayInZone("UTC")).toBe("2026-11-14");
+    expect(todayInZone("Pacific/Kiritimati")).toBe("2026-11-15");
+  });
+
+  it("falls back to the device date for a missing or unknown zone", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-15T02:30:00Z"));
+    // The fallback is acceptable because the field stays editable; a throw or an
+    // empty value would not be, since a blank date fails validation on save.
+    expect(todayInZone("Not/AZone")).toBe(todayISO());
+    expect(todayInZone(null)).toBe(todayISO());
+    expect(todayInZone("  ")).toBe(todayISO());
+    expect(todayInZone("Not/AZone")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it("formats timestamps with style presets without throwing", () => {
     // dateStyle/timeStyle cannot be mixed with day/month parts; a regression here
     // blanked the whole Connections page on the sync history.
@@ -63,4 +91,8 @@ describe("date helpers", () => {
     expect(rendered).toContain("2026");
     expect(rendered).toMatch(/\d/);
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
